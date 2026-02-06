@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# UV
+uv.lock
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+test_data/
+test_output/
+
+# Output volumes (large files)
+output_volume/
+*.shard
+*.frags
+*.spatial.gz
+
+# Temporary files
+*.tmp
+*.temp

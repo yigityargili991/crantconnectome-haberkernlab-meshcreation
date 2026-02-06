@@ -1,0 +1,20 @@
+[project]
+name = "mesh-creation"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "tifffile",
+    "cloud-volume",
+    "igneous-pipeline",
+    "task-queue",
+]
+
+[tool.uv]
+environments = ["platform_system != 'Windows'"]
+
+[tool.uv.pip]
+no-build-isolation-package = ["crackle-codec", "shard-computer"]
+
+[tool.uv.extra-build-dependencies]
+shard-computer = ["pybind11"]

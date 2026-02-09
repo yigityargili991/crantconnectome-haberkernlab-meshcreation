@@ -39,12 +39,33 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
         return array.astype(np.uint32, copy=False)
 
     if np.issubdtype(array.dtype, np.floating):
-        if not np.isfinite(array).all():
-            raise ValueError("Input contains NaN or infinite values; cannot convert to uint32 labels safely.")
-        if not np.equal(array, np.floor(array)).all():
-            raise ValueError("Input contains non-integer float values; cannot convert to uint32 labels safely.")
-        min_val = array.min()
-        max_val = array.max()
+        # Validate in chunks to reduce memory usage for large 3D volumes
+        # Process array in slabs to avoid allocating large temporary arrays
+        chunk_size = 1024 * 1024 * 10  # ~10M elements per chunk
+        flat_view = array.ravel()
+        total_elements = flat_view.size
+        
+        min_val = np.inf
+        max_val = -np.inf
+        
+        for start_idx in range(0, total_elements, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_elements)
+            chunk = flat_view[start_idx:end_idx]
+            
+            # Check for NaN/inf in chunk
+            if not np.isfinite(chunk).all():
+                raise ValueError("Input contains NaN or infinite values; cannot convert to uint32 labels safely.")
+            
+            # Check integrality in chunk without allocating floor array
+            if not np.equal(chunk, np.floor(chunk)).all():
+                raise ValueError("Input contains non-integer float values; cannot convert to uint32 labels safely.")
+            
+            # Track min/max
+            chunk_min = chunk.min()
+            chunk_max = chunk.max()
+            min_val = min(min_val, chunk_min)
+            max_val = max(max_val, chunk_max)
+        
         if min_val < 0 or max_val > UINT32_MAX:
             raise ValueError(
                 f"Input values out of uint32 range [{0}, {UINT32_MAX}]: min={min_val}, max={max_val}"

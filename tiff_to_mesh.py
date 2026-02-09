@@ -57,14 +57,14 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
                 raise ValueError("Input contains NaN or infinite values; cannot convert to uint32 labels safely.")
             
             # Check integrality in chunk without allocating floor array
-            if not np.equal(chunk, np.floor(chunk)).all():
+            if (chunk != np.trunc(chunk)).any():
                 raise ValueError("Input contains non-integer float values; cannot convert to uint32 labels safely.")
             
             # Track min/max
             chunk_min = chunk.min()
             chunk_max = chunk.max()
-            min_val = min(min_val, chunk_min)
-            max_val = max(max_val, chunk_max)
+            min_val = np.minimum(min_val, chunk_min)
+            max_val = np.maximum(max_val, chunk_max)
         
         if min_val < 0 or max_val > UINT32_MAX:
             raise ValueError(

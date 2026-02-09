@@ -38,6 +38,10 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
     if np.issubdtype(array.dtype, np.bool_):
         return array.astype(np.uint32, copy=False)
 
+    # Handle empty arrays early to avoid crashes from min()/max() calls
+    if array.size == 0:
+        return array.astype(np.uint32, copy=False)
+
     if np.issubdtype(array.dtype, np.floating):
         if not np.isfinite(array).all():
             raise ValueError("Input contains NaN or infinite values; cannot convert to uint32 labels safely.")

@@ -63,8 +63,8 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
             # Track min/max
             chunk_min = chunk.min()
             chunk_max = chunk.max()
-            min_val = np.minimum(min_val, chunk_min)
-            max_val = np.maximum(max_val, chunk_max)
+            min_val = min(min_val, chunk_min)
+            max_val = max(max_val, chunk_max)
         
         if min_val < 0 or max_val > UINT32_MAX:
             raise ValueError(

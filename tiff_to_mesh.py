@@ -28,6 +28,40 @@ RESOLUTION = tuple(args.res)
 CHUNK_SIZE = (64, 64, 64)
 MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
+UINT32_MAX = np.iinfo(np.uint32).max
+
+
+def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
+    if array.dtype == np.uint32:
+        return array
+
+    if np.issubdtype(array.dtype, np.bool_):
+        return array.astype(np.uint32, copy=False)
+
+    if np.issubdtype(array.dtype, np.floating):
+        if not np.isfinite(array).all():
+            raise ValueError("Input contains NaN or infinite values; cannot convert to uint32 labels safely.")
+        if not np.equal(array, np.floor(array)).all():
+            raise ValueError("Input contains non-integer float values; cannot convert to uint32 labels safely.")
+        min_val = array.min()
+        max_val = array.max()
+        if min_val < 0 or max_val > UINT32_MAX:
+            raise ValueError(
+                f"Input values out of uint32 range [{0}, {UINT32_MAX}]: min={min_val}, max={max_val}"
+            )
+        logger.warning("Converting integer-valued float labels to uint32.")
+        return array.astype(np.uint32, copy=False)
+
+    if np.issubdtype(array.dtype, np.integer):
+        min_val = array.min()
+        max_val = array.max()
+        if min_val < 0 or max_val > UINT32_MAX:
+            raise ValueError(
+                f"Input values out of uint32 range [{0}, {UINT32_MAX}]: min={min_val}, max={max_val}"
+            )
+        return array.astype(np.uint32, copy=False)
+
+    raise TypeError(f"Unsupported dtype for segmentation labels: {array.dtype}")
 
 if os.path.isfile(TIFF_PATH):
     tiff_file = TIFF_PATH
@@ -47,8 +81,7 @@ if os.path.exists(mesh_output_dir):
 data = tifffile.imread(tiff_file)
 logger.info(f"Loaded shape: {data.shape}, dtype: {data.dtype}")
 
-if data.dtype != np.uint32:
-    data = data.astype(np.uint32)
+data = ensure_uint32_labels(data)
 
 if data.ndim == 3:
     data = np.transpose(data, (2, 1, 0))

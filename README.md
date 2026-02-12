@@ -15,10 +15,9 @@ uv sync
 ## Usage
 
 ```bash
-python tiff_to_mesh.py --d <directory of your 3d tiff file> \
+python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
                        --out <your output directory> \
                        --res <resolution of your mesh> \
-                       --translate <mesh translation in nm> \
                        --unsharded \
                        --setgit
 ```
@@ -27,20 +26,18 @@ python tiff_to_mesh.py --d <directory of your 3d tiff file> \
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--d` | Directory containing your 3D TIFF file (required) | - |
-| `--out` | Output directory for meshes | Same as `--d` |
+| `--d` | Directory containing your 3D TIFF file, or path to a `.tif` file directly (required) | - |
+| `--out` | Output directory for meshes | Same as `--d` (parent directory if `--d` is a file) |
 | `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
-| `--translate` | Translation in nm applied to mesh vertices (x y z) | `-5400 -5400 -60` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
 | `--setgit` | Initialize a git repo in output for Neuroglancer | Disabled |
 
 ### Example
 
 ```bash
-python tiff_to_mesh.py --d ./my_segmentation \
+python tiff_to_mesh.py --d ./my_segmentation.tif \
                        --out ./meshes \
                        --res 800 800 840 \
-                       --translate -5400 -5400 -60 \
                        --setgit
 ```
 
@@ -57,19 +54,17 @@ https://raw.githubusercontent.com/<username>/<repo>/<commit>/mesh/|neuroglancer-
 
 ![Neuroglancer Layers](readme_images/neuroglancer_layers.png)
 
-3. Configure the source with the layer defaults (no extra transform needed anymore):
+3. To align the mesh with the EM segmentation, set a source transform translation in the Neuroglancer layer settings (e.g. `-5400 -5400 -60` nm for CRANTb neuropils).
 
 ![Neuroglancer Source Config](readme_images/neuroglancer_source.png)
 
 ## Alignment
 
-Mesh alignment is baked into the mesh metadata transform. By default, vertices are positioned using:
+The mesh info transform contains only the resolution scaling (e.g. `[800, 800, 840]`). Translation is **not** baked into the mesh metadata.
 
-`vertex_nm = vertex_voxel * [800, 800, 840] + [-5400, -5400, -60]`
+- **Neuroglancer**: Apply the translation via the layer source transform in the UI.
 
-No manual transform is required in Neuroglancer or CloudVolume for the **mesh** layer.
 
-Note: the segmentation volume overlay uses `voxel_offset = [0, 0, 0]` and does not carry the translation, so it will not be co-registered with the meshes. If you need the volume overlay to align as well, set a matching offset in Neuroglancer's layer source transform.
 
 ## Output Structure
 

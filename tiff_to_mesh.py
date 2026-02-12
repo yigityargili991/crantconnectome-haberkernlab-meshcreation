@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--d', required=True, help='Directory containing TIFF file')
-parser.add_argument('--out', default=None, help='Output directory (default: same as input)')
+parser.add_argument(
+    '--out',
+    default=None,
+    help='Base output directory; files are written to <out>/output_volume (default: same as input directory)'
+)
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
 parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')

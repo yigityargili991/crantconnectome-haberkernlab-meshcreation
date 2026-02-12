@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
+import json
 
 import numpy as np
 import tifffile
@@ -16,19 +17,24 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--d', required=True, help='Directory containing TIFF file')
-parser.add_argument('--out', default=None, help='Output directory (default: same as input)')
-parser.add_argument('--res', nargs=3, type=int, default=[8, 8, 42], metavar=('X', 'Y', 'Z'), help='Resolution (default: 8 8 42)')
+parser.add_argument(
+    '--out',
+    default=None,
+    help='Base output directory; files are written to <out>/output_volume (default: same as input directory)'
+)
+parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
 parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
 args = parser.parse_args()
 
 TIFF_PATH = args.d
-OUTPUT_PATH = args.out if args.out else args.d
+OUTPUT_PATH = args.out if args.out else (os.path.dirname(args.d) if os.path.isfile(args.d) else args.d)
 RESOLUTION = tuple(args.res)
 CHUNK_SIZE = (64, 64, 64)
 MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
 UINT32_MAX = np.iinfo(np.uint32).max
+
 
 
 def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
@@ -106,7 +112,6 @@ info = {
     }]
 }
 
-import json
 with open(os.path.join(output_dir, "info"), "w") as f:
     json.dump(info, f)
 
@@ -182,7 +187,7 @@ else:
     logger.info("Multi-resolution meshes generated.")
 
     import glob
-    for pattern in ["*.frags", "*.spatial.gz"]:
+    for pattern in ["*.frags"]:
         for f in glob.glob(os.path.join(mesh_output_dir, pattern)):
             os.remove(f)
 

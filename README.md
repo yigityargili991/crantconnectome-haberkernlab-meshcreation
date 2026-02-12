@@ -18,6 +18,7 @@ uv sync
 python tiff_to_mesh.py --d <directory of your 3d tiff file> \
                        --out <your output directory> \
                        --res <resolution of your mesh> \
+                       --translate <mesh translation in nm> \
                        --unsharded \
                        --setgit
 ```
@@ -28,7 +29,8 @@ python tiff_to_mesh.py --d <directory of your 3d tiff file> \
 |------|-------------|---------|
 | `--d` | Directory containing your 3D TIFF file (required) | - |
 | `--out` | Output directory for meshes | Same as `--d` |
-| `--res` | Voxel resolution in nm (three integers) | `8 8 42` |
+| `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
+| `--translate` | Translation in nm applied to mesh vertices (x y z) | `-5400 -5400 -60` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
 | `--setgit` | Initialize a git repo in output for Neuroglancer | Disabled |
 
@@ -37,7 +39,8 @@ python tiff_to_mesh.py --d <directory of your 3d tiff file> \
 ```bash
 python tiff_to_mesh.py --d ./my_segmentation \
                        --out ./meshes \
-                       --res 8 8 42 \
+                       --res 800 800 840 \
+                       --translate -5400 -5400 -60 \
                        --setgit
 ```
 
@@ -54,20 +57,19 @@ https://raw.githubusercontent.com/<username>/<repo>/<commit>/mesh/|neuroglancer-
 
 ![Neuroglancer Layers](readme_images/neuroglancer_layers.png)
 
-3. Configure the source with the correct resolution and transform:
+3. Configure the source with the layer defaults (no extra transform needed anymore):
 
 ![Neuroglancer Source Config](readme_images/neuroglancer_source.png)
 
-## Aligning the Mesh
+## Alignment
 
-Initially, your mesh will not be aligned with the segmentation. Use these transform parameters:
+Mesh alignment is baked into the mesh metadata transform. By default, vertices are positioned using:
 
-| Parameter | Value |
-|-----------|-------|
-| Scale | `800 800 840` nm |
-| Translation | `-5400 -5400 -60` (x, y, z) |
+`vertex_nm = vertex_voxel * [800, 800, 840] + [-5400, -5400, -60]`
 
-After applying this transform, the mesh will align with the segments and brain mesh for proofreading.
+No manual transform is required in Neuroglancer or CloudVolume for the **mesh** layer.
+
+Note: the segmentation volume overlay uses `voxel_offset = [0, 0, 0]` and does not carry the translation, so it will not be co-registered with the meshes. If you need the volume overlay to align as well, set a matching offset in Neuroglancer's layer source transform.
 
 ## Output Structure
 

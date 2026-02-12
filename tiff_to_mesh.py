@@ -19,43 +19,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--d', required=True, help='Directory containing TIFF file')
 parser.add_argument('--out', default=None, help='Output directory (default: same as input)')
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
-parser.add_argument('--translate', nargs=3, type=float, default=[-5400.0, -5400.0, -60.0], metavar=('X', 'Y', 'Z'), help='Translation in nm applied to mesh vertices (default: -5400 -5400 -60)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
 parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
 args = parser.parse_args()
 
 TIFF_PATH = args.d
-OUTPUT_PATH = args.out if args.out else args.d
+OUTPUT_PATH = args.out if args.out else (os.path.dirname(args.d) if os.path.isfile(args.d) else args.d)
 RESOLUTION = tuple(args.res)
-TRANSLATION_NM = tuple(args.translate)
 CHUNK_SIZE = (64, 64, 64)
 MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
 UINT32_MAX = np.iinfo(np.uint32).max
 
-
-def build_mesh_transform(resolution, translation):
-    return [
-        float(resolution[0]), 0.0, 0.0, float(translation[0]),
-        0.0, float(resolution[1]), 0.0, float(translation[1]),
-        0.0, 0.0, float(resolution[2]), float(translation[2]),
-    ]
-
-
-def update_mesh_info_transform(mesh_info_path, resolution, translation):
-    """Overwrite the mesh info transform to include translation.
-
-    Igneous already writes spatial_index.resolution and spatial_index.chunk_size
-    based on the volume's resolution, so only the transform needs patching to
-    add the translation component.
-    """
-    with open(mesh_info_path, "r") as f:
-        mesh_info = json.load(f)
-
-    mesh_info["transform"] = build_mesh_transform(resolution, translation)
-
-    with open(mesh_info_path, "w") as f:
-        json.dump(mesh_info, f)
 
 
 def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
@@ -211,10 +186,6 @@ else:
     for pattern in ["*.frags"]:
         for f in glob.glob(os.path.join(mesh_output_dir, pattern)):
             os.remove(f)
-
-mesh_info_path = os.path.join(mesh_output_dir, "info")
-update_mesh_info_transform(mesh_info_path, RESOLUTION, TRANSLATION_NM)
-logger.info(f"Applied mesh transform: scale={RESOLUTION}, translate={TRANSLATION_NM}")
 
 cv = CloudVolume(cloudvolume_path)
 logger.info(f"Mesh info: {cv.mesh.meta.info}")

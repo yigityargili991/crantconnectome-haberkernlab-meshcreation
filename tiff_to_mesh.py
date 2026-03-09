@@ -30,10 +30,11 @@ args = parser.parse_args()
 TIFF_PATH = args.d
 OUTPUT_PATH = args.out if args.out else (os.path.dirname(args.d) if os.path.isfile(args.d) else args.d)
 RESOLUTION = tuple(args.res)
-CHUNK_SIZE = (64, 64, 64)
+CHUNK_SIZE = (128, 128, 32) # based on the neuropil meshes 
 MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
 UINT32_MAX = np.iinfo(np.uint32).max
+VOXEL_OFFSET = (-54, -54, -3) # based on the neuropil meshes 
 
 
 
@@ -106,9 +107,9 @@ info = {
         "key": f"{RESOLUTION[0]}_{RESOLUTION[1]}_{RESOLUTION[2]}",
         "resolution": list(RESOLUTION),
         "size": list(data.shape),
-        "voxel_offset": [0, 0, 0],
+        "voxel_offset": list(VOXEL_OFFSET),
         "chunk_sizes": [list(CHUNK_SIZE)],
-        "encoding": "raw"
+        "encoding": "raw",
     }]
 }
 

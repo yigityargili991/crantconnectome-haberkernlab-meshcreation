@@ -29,6 +29,7 @@ test_output/
 
 # Output volumes (large files)
 output_volume/
+meshes/
 *.shard
 *.frags
 *.spatial.gz

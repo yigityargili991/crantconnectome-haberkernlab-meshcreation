@@ -4,7 +4,7 @@ Mesh creation workflow for the Haberkern Lab for clonal raider ant connectome (C
 
 ## Overview
 
-This is a simple CLI workflow that uses [Igneous](https://github.com/seung-lab/igneous) mesh generation tasks in the backend. The idea is to use 3D TIFF images of meshes (generated in Thermo Fisher AMIRA) to generate neuropil meshes that can be visualized in [Neuroglancer](https://github.com/google/neuroglancer).
+This is a simple CLI workflow that uses [Igneous](https://github.com/seung-lab/igneous) mesh generation tasks in the backend. It accepts 3D TIFF segmentation images (e.g. from Thermo Fisher AMIRA) or STL mesh files and generates neuropil meshes that can be visualized in [Neuroglancer](https://github.com/google/neuroglancer).
 
 ## Installation
 
@@ -26,7 +26,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--d` | Directory containing your 3D TIFF file, or path to a `.tif` file directly (required) | - |
+| `--d` | Directory containing your 3D TIFF/STL file(s), or path to a `.tif`/`.stl` file directly (required) | - |
 | `--out` | Base output directory; files are written to `<out>/output_volume/` | Same as `--d` (parent directory if `--d` is a file) |
 | `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
@@ -54,15 +54,16 @@ https://raw.githubusercontent.com/<username>/<repo>/<commit>/mesh/|neuroglancer-
 
 ![Neuroglancer Layers](readme_images/neuroglancer_layers.png)
 
-3. To align the mesh with the EM segmentation, set a source transform translation in the Neuroglancer layer settings (e.g. `-5400 -5400 -60` nm for CRANTb neuropils).
-
-![Neuroglancer Source Config](readme_images/neuroglancer_source.png)
+3. The mesh should appear at the correct position automatically — no manual translation needed.
 
 ## Alignment
 
-The mesh info transform contains only the resolution scaling (e.g. `[800, 800, 840]`). Translation is **not** baked into the mesh metadata.
+The voxel offset is baked into the mesh metadata by the tool:
 
-- **Neuroglancer**: Apply the translation via the layer source transform in the UI.
+- **TIFF inputs**: the volume is centered at the origin (`-shape // 2`).
+- **STL inputs**: the original physical position is preserved.
+
+No manual source transform translation is required in Neuroglancer.
 
 
 

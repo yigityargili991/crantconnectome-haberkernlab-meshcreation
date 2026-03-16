@@ -36,13 +36,16 @@ def push_to_github(output_dir: str, repo_name: str):
     full_repo = f"{username}/{repo_name}"
     logger.info(f"Pushing to GitHub repo: {full_repo}")
 
-    # Initialize git repo in output_dir
-    subprocess.run(["git", "init"], cwd=output_dir, capture_output=True)
+    # Initialize git repo in output_dir with explicit branch name
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=output_dir,
+        capture_output=True, text=True, check=True
+    )
 
     # Create the repo (tolerate "already exists")
     create_result = subprocess.run(
         ["gh", "repo", "create", full_repo, "--public"],
-        capture_output=True, text=True
+        capture_output=True, text=True, stdin=subprocess.DEVNULL
     )
     if create_result.returncode != 0:
         if "already exists" in create_result.stderr:
@@ -53,42 +56,47 @@ def push_to_github(output_dir: str, repo_name: str):
             )
 
     # Stage and commit
-    subprocess.run(["git", "add", "."], cwd=output_dir, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-m", "new mesh"],
-        cwd=output_dir, capture_output=True
+        ["git", "add", "."], cwd=output_dir,
+        capture_output=True, text=True, check=True
     )
+    commit_result = subprocess.run(
+        ["git", "commit", "-m", "new mesh"], cwd=output_dir,
+        capture_output=True, text=True
+    )
+    if commit_result.returncode != 0:
+        if "nothing to commit" in commit_result.stdout:
+            logger.info("No new changes to commit, pushing existing HEAD.")
+        else:
+            raise RuntimeError(
+                f"git commit failed: {commit_result.stderr.strip() or commit_result.stdout.strip()}"
+            )
 
     # Set remote origin (replace if already set)
     remote_url = f"https://github.com/{full_repo}.git"
     subprocess.run(
-        ["git", "remote", "remove", "origin"],
-        cwd=output_dir, capture_output=True
+        ["git", "remote", "remove", "origin"], cwd=output_dir,
+        capture_output=True  # OK to fail if no origin yet
     )
     subprocess.run(
-        ["git", "remote", "add", "origin", remote_url],
-        cwd=output_dir, capture_output=True
+        ["git", "remote", "add", "origin", remote_url], cwd=output_dir,
+        capture_output=True, text=True, check=True
     )
 
-    # Push — try main first, fall back to master
+    # Push to remote
     push_result = subprocess.run(
         ["git", "push", "-u", "origin", "main"],
         cwd=output_dir, capture_output=True, text=True
     )
     if push_result.returncode != 0:
-        push_result = subprocess.run(
-            ["git", "push", "-u", "origin", "master"],
-            cwd=output_dir, capture_output=True, text=True
+        raise RuntimeError(
+            f"Failed to push to GitHub:\n{push_result.stderr.strip()}"
         )
-        if push_result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to push to GitHub:\n{push_result.stderr.strip()}"
-            )
 
     # Get commit hash
     hash_result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=output_dir, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"], cwd=output_dir,
+        capture_output=True, text=True, check=True
     )
     commit_hash = hash_result.stdout.strip()
 
@@ -108,9 +116,10 @@ parser.add_argument(
 )
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
-parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
-parser.add_argument('--push', metavar='REPO_NAME', default=None,
-                    help='Create a public GitHub repo, push output, and print Neuroglancer raw link')
+git_group = parser.add_mutually_exclusive_group()
+git_group.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
+git_group.add_argument('--push', metavar='REPO_NAME', default=None,
+                       help='Create a public GitHub repo, push output, and print Neuroglancer raw link (implies --setgit)')
 args = parser.parse_args()
 
 INPUT_PATH = args.d

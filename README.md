@@ -19,8 +19,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
                        --out <your output directory> \
                        --res <resolution of your mesh> \
                        --unsharded \
-                       --setgit \
-                       --push <repo_name>
+                       --setgit              # or --push <repo_name>
 ```
 
 **Flags:**
@@ -32,7 +31,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
 | `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
 | `--setgit` | Initialize a git repo in output for Neuroglancer | Disabled |
-| `--push REPO_NAME` | Create a new public GitHub repo, push mesh output, and print Neuroglancer raw link (requires `gh` CLI) | Disabled |
+| `--push REPO_NAME` | Create a new public GitHub repo, initialize git if needed, push mesh output, and print Neuroglancer raw link (requires `gh` CLI; implies `--setgit`) | Disabled |
 
 ### Example
 

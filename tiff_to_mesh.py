@@ -17,6 +17,96 @@ import igneous.task_creation as tc
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def get_github_username() -> str:
+    result = subprocess.run(
+        ["gh", "api", "user", "--jq", ".login"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to detect GitHub username via `gh` CLI. "
+            f"Make sure `gh` is installed and authenticated.\n{result.stderr.strip()}"
+        )
+    return result.stdout.strip()
+
+
+def push_to_github(output_dir: str, repo_name: str):
+    username = get_github_username()
+    full_repo = f"{username}/{repo_name}"
+    logger.info(f"Pushing to GitHub repo: {full_repo}")
+
+    # Initialize git repo in output_dir with explicit branch name
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=output_dir,
+        capture_output=True, text=True, check=True
+    )
+
+    # Create the repo (tolerate "already exists")
+    create_result = subprocess.run(
+        ["gh", "repo", "create", full_repo, "--public"],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL
+    )
+    if create_result.returncode != 0:
+        if "already exists" in create_result.stderr:
+            logger.warning(f"Repo {full_repo} already exists, pushing new commit to it.")
+        else:
+            raise RuntimeError(
+                f"Failed to create GitHub repo: {create_result.stderr.strip()}"
+            )
+
+    # Stage and commit
+    subprocess.run(
+        ["git", "add", "."], cwd=output_dir,
+        capture_output=True, text=True, check=True
+    )
+    commit_result = subprocess.run(
+        ["git", "commit", "-m", "new mesh"], cwd=output_dir,
+        capture_output=True, text=True
+    )
+    if commit_result.returncode != 0:
+        if "nothing to commit" in commit_result.stdout:
+            logger.info("No new changes to commit, pushing existing HEAD.")
+        else:
+            raise RuntimeError(
+                f"git commit failed: {commit_result.stderr.strip() or commit_result.stdout.strip()}"
+            )
+
+    # Set remote origin (replace if already set)
+    remote_url = f"https://github.com/{full_repo}.git"
+    subprocess.run(
+        ["git", "remote", "remove", "origin"], cwd=output_dir,
+        capture_output=True  # OK to fail if no origin yet
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", remote_url], cwd=output_dir,
+        capture_output=True, text=True, check=True
+    )
+
+    # Push to remote
+    push_result = subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=output_dir, capture_output=True, text=True
+    )
+    if push_result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to push to GitHub:\n{push_result.stderr.strip()}"
+        )
+
+    # Get commit hash
+    hash_result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=output_dir,
+        capture_output=True, text=True, check=True
+    )
+    commit_hash = hash_result.stdout.strip()
+
+    raw_link = (
+        f"https://raw.githubusercontent.com/{full_repo}/"
+        f"{commit_hash}/mesh/|neuroglancer-precomputed:"
+    )
+    logger.info(f"Neuroglancer source URL:\n{raw_link}")
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--d', required=True, help='Directory or path to a TIFF/STL file')
 parser.add_argument(
@@ -26,7 +116,10 @@ parser.add_argument(
 )
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
-parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
+git_group = parser.add_mutually_exclusive_group()
+git_group.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
+git_group.add_argument('--push', metavar='REPO_NAME', default=None,
+                       help='Create a public GitHub repo, push output, and print Neuroglancer raw link (implies --setgit)')
 args = parser.parse_args()
 
 INPUT_PATH = args.d
@@ -295,10 +388,12 @@ else:
 cv = CloudVolume(cloudvolume_path)
 logger.info(f"Mesh info: {cv.mesh.meta.info}")
 
-if args.setgit:
-    git_dir = os.path.join(OUTPUT_PATH, ".git")
+if args.push:
+    push_to_github(output_dir, args.push)
+elif args.setgit:
+    git_dir = os.path.join(output_dir, ".git")
     if not os.path.exists(git_dir):
-        subprocess.run(["git", "init"], cwd=OUTPUT_PATH, capture_output=True)
-        logger.info(f"Git repo initialized in {OUTPUT_PATH}")
+        subprocess.run(["git", "init"], cwd=output_dir, capture_output=True)
+        logger.info(f"Git repo initialized in {output_dir}")
 
 logger.info("Done!")

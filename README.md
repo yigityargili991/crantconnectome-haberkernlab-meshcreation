@@ -19,7 +19,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
                        --out <your output directory> \
                        --res <resolution of your mesh> \
                        --unsharded \
-                       --setgit
+                       --setgit              # or --push <repo_name>
 ```
 
 **Flags:**
@@ -31,6 +31,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
 | `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
 | `--setgit` | Initialize a git repo in output for Neuroglancer | Disabled |
+| `--push REPO_NAME` | Create a new public GitHub repo, initialize git if needed, push mesh output, and print Neuroglancer raw link (requires `gh` CLI; implies `--setgit`) | Disabled |
 
 ### Example
 
@@ -42,6 +43,8 @@ python tiff_to_mesh.py --d ./my_segmentation.tif \
 ```
 
 ## Adding the Mesh to Neuroglancer
+
+When using `--push`, the raw link is printed automatically. If you only used `--setgit`, push manually and construct the URL yourself.
 
 After running with `--setgit`, push the generated mesh to GitHub. Then add it to your Neuroglancer state:
 
@@ -87,5 +90,5 @@ output_volume/
 ├── mesh/             # Generated meshes
 │   ├── info          # Mesh metadata (JSON)
 │   └── *.shard       # Sharded mesh files (or per-segment files if --unsharded)
-└── .git/             # Git repo (if --setgit)
+└── .git/             # Git repo (if --setgit or --push)
 ```

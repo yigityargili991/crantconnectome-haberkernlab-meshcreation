@@ -4,9 +4,11 @@ import os
 import shutil
 import subprocess
 import json
+from dataclasses import dataclass
 
 import numpy as np
 import tifffile
+import trimesh
 from cloudvolume import CloudVolume
 from taskqueue import LocalTaskQueue
 
@@ -16,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--d', required=True, help='Directory containing TIFF file')
+parser.add_argument('--d', required=True, help='Directory or path to a TIFF/STL file')
 parser.add_argument(
     '--out',
     default=None,
@@ -27,10 +29,9 @@ parser.add_argument('--unsharded', action='store_true', help='Use unsharded form
 parser.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
 args = parser.parse_args()
 
-TIFF_PATH = args.d
+INPUT_PATH = args.d
 OUTPUT_PATH = args.out if args.out else (os.path.dirname(args.d) if os.path.isfile(args.d) else args.d)
 RESOLUTION = tuple(args.res)
-CHUNK_SIZE = (64, 64, 64)
 MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
 UINT32_MAX = np.iinfo(np.uint32).max
@@ -73,13 +74,131 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
 
     raise TypeError(f"Unsupported dtype for segmentation labels: {array.dtype}")
 
-if os.path.isfile(TIFF_PATH):
-    tiff_file = TIFF_PATH
+@dataclass
+class MeshEntryLabels:
+    """Load TIFF or STL file(s) into a uint32 voxel array (X,Y,Z) and
+    compute Neuroglancer volume parameters (chunk size, voxel offset).
+
+    The chunk size is chosen per-axis as the largest power-of-2 candidate
+    that still yields at least `min_chunks` chunks along that axis.
+
+    Voxel offset:
+      TIFF — centers the volume at the origin (-shape // 2).
+      STL  — preserves the original physical position (global_min in voxel coords).
+    """
+    file_paths: list
+    resolution: tuple
+    min_chunks: int = 8
+
+    _CHUNK_CANDIDATES = (32, 64, 128)
+
+    def __post_init__(self):
+        exts = {os.path.splitext(f)[1].lower() for f in self.file_paths}
+        if exts <= {'.tif', '.tiff'}:
+            if len(self.file_paths) != 1:
+                raise ValueError("Only one TIFF file supported at a time")
+            self.data = self._load_tiff(self.file_paths[0])
+            self.voxel_offset = [-(s // 2) for s in self.data.shape]
+        elif exts <= {'.stl'}:
+            self.data = self._load_stls()
+            # voxel_offset set in _load_stls from global_min
+        else:
+            raise ValueError(f"Mixed or unsupported file types: {exts}")
+
+    def _load_tiff(self, path) -> np.ndarray:
+        data = tifffile.imread(path)
+        logger.info(f"Loaded TIFF shape: {data.shape}, dtype: {data.dtype}")
+        data = ensure_uint32_labels(data)
+        if data.ndim == 3:
+            data = np.transpose(data, (2, 1, 0))
+        return data
+
+    def _load_stls(self) -> np.ndarray:
+        origins = []
+        grids = []
+        for stl_file in self.file_paths:
+            mesh = trimesh.load(stl_file, force='mesh')
+            logger.info(f"Loaded STL {os.path.basename(stl_file)}: "
+                        f"{len(mesh.vertices)} verts, {len(mesh.faces)} faces")
+            mesh.vertices /= np.array(self.resolution, dtype=float)
+            vg = mesh.voxelized(pitch=1.0).fill()
+            origin = np.round(vg.transform[:3, 3]).astype(int)
+            origins.append(origin)
+            grids.append(vg.matrix)
+
+        # Compute global bounding box across all voxelized meshes
+        global_min = np.min(origins, axis=0)
+        global_max = np.max(
+            [o + np.array(g.shape) for o, g in zip(origins, grids)], axis=0
+        )
+        volume_shape = tuple(global_max - global_min)
+        self.voxel_offset = global_min.tolist()
+
+        # Paint each mesh into the combined volume with a unique label
+        data = np.zeros(volume_shape, dtype=np.uint32)
+        for label_id, (origin, grid) in enumerate(zip(origins, grids), start=1):
+            offset = origin - global_min
+            slices = tuple(slice(o, o + s) for o, s in zip(offset, grid.shape))
+            data[slices][grid] = np.uint32(label_id)
+
+        logger.info(f"Combined {len(self.file_paths)} STL files into "
+                    f"volume {volume_shape}, labels 1-{len(self.file_paths)}")
+        return data
+
+    def compute_chunk_size(self) -> tuple:
+        """Pick the largest power-of-2 chunk per axis such that
+        each axis has at least `min_chunks` chunks."""
+        chunks = []
+        for dim_size in self.data.shape:
+            chunk = self._CHUNK_CANDIDATES[0]
+            for candidate in self._CHUNK_CANDIDATES:
+                if dim_size >= candidate * self.min_chunks:
+                    chunk = candidate
+            chunks.append(chunk)
+        return tuple(chunks)
+
+    def compute_translation_nm(self) -> tuple:
+        """Physical translation in nm (for reference / verification).
+
+        With voxel_offset baked into info.json this should no longer be
+        needed for manual Neuroglancer source transforms, but kept for
+        redundancy/checks.
+        """
+        return tuple(o * r for o, r in zip(self.voxel_offset, self.resolution))
+
+    def build_info(self) -> dict:
+        """Build the Neuroglancer precomputed info dict using
+        the computed chunk size and voxel offset."""
+        chunk_size = self.compute_chunk_size()
+        translation_nm = self.compute_translation_nm()
+        logger.info(
+            f"Computed chunk_size={chunk_size}, voxel_offset={self.voxel_offset} "
+            f"(= {translation_nm} nm)"
+        )
+        return {
+            "data_type": "uint32",
+            "num_channels": 1,
+            "type": "segmentation",
+            "scales": [{
+                "key": f"{self.resolution[0]}_{self.resolution[1]}_{self.resolution[2]}",
+                "resolution": list(self.resolution),
+                "size": list(self.data.shape),
+                "voxel_offset": list(self.voxel_offset),
+                "chunk_sizes": [list(chunk_size)],
+                "encoding": "raw",
+            }]
+        }
+
+SUPPORTED_EXTENSIONS = ('.tif', '.tiff', '.stl')
+
+if os.path.isfile(INPUT_PATH):
+    input_files = [INPUT_PATH]
 else:
-    tiff_files = [f for f in os.listdir(TIFF_PATH) if f.endswith('.tif') or f.endswith('.tiff')]
-    if not tiff_files:
-        raise ValueError(f"No TIFF files found in {TIFF_PATH}")
-    tiff_file = os.path.join(TIFF_PATH, tiff_files[0])
+    candidates = sorted(f for f in os.listdir(INPUT_PATH)
+                        if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS)
+    if not candidates:
+        raise ValueError(f"No TIFF or STL files found in {INPUT_PATH}")
+    input_files = [os.path.join(INPUT_PATH, f) for f in candidates]
 
 output_dir = os.path.join(OUTPUT_PATH, "output_volume")
 mesh_output_dir = os.path.join(output_dir, MESH_DIR)
@@ -88,29 +207,11 @@ cloudvolume_path = f"file://{output_dir}"
 if os.path.exists(mesh_output_dir):
     shutil.rmtree(mesh_output_dir)
 
-data = tifffile.imread(tiff_file)
-logger.info(f"Loaded shape: {data.shape}, dtype: {data.dtype}")
-
-data = ensure_uint32_labels(data)
-
-if data.ndim == 3:
-    data = np.transpose(data, (2, 1, 0))
+entry = MeshEntryLabels(file_paths=input_files, resolution=RESOLUTION)
+data = entry.data
+info = entry.build_info()
 
 os.makedirs(output_dir, exist_ok=True)
-
-info = {
-    "data_type": "uint32",
-    "num_channels": 1,
-    "type": "segmentation",
-    "scales": [{
-        "key": f"{RESOLUTION[0]}_{RESOLUTION[1]}_{RESOLUTION[2]}",
-        "resolution": list(RESOLUTION),
-        "size": list(data.shape),
-        "voxel_offset": [0, 0, 0],
-        "chunk_sizes": [list(CHUNK_SIZE)],
-        "encoding": "raw"
-    }]
-}
 
 with open(os.path.join(output_dir, "info"), "w") as f:
     json.dump(info, f)

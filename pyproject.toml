@@ -8,6 +8,7 @@ dependencies = [
     "cloud-volume",
     "igneous-pipeline",
     "task-queue",
+    "trimesh",
 ]
 
 [tool.uv]

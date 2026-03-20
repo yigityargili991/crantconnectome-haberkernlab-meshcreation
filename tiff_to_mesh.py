@@ -112,7 +112,7 @@ parser.add_argument('--d', required=True, help='Directory or path to a TIFF/STL 
 parser.add_argument(
     '--out',
     default=None,
-    help='Base output directory; files are written to <out>/output_volume (default: same as input directory)'
+    help='Base output directory; files are written to <out>/<input_name> (default: same as input directory)'
 )
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
@@ -293,7 +293,17 @@ else:
         raise ValueError(f"No TIFF or STL files found in {INPUT_PATH}")
     input_files = [os.path.join(INPUT_PATH, f) for f in candidates]
 
-output_dir = os.path.join(OUTPUT_PATH, "output_volume")
+if os.path.isfile(INPUT_PATH):
+    volume_name = os.path.splitext(os.path.basename(INPUT_PATH))[0]
+else:
+    volume_name = os.path.basename(os.path.normpath(INPUT_PATH))
+
+if args.out:
+    output_dir = os.path.join(args.out, volume_name)
+elif os.path.isfile(INPUT_PATH):
+    output_dir = os.path.join(os.path.dirname(INPUT_PATH), volume_name)
+else:
+    output_dir = INPUT_PATH
 mesh_output_dir = os.path.join(output_dir, MESH_DIR)
 cloudvolume_path = f"file://{output_dir}"
 

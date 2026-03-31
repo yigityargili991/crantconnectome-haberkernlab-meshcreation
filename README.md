@@ -133,7 +133,7 @@ Use `--labels` to manually override any name.
 
 ## Generated Meshes
 
-Latest CRANTb neuropil meshes we created: [haberkernlab_mesh_repo](https://github.com/yigityargili991/haberkernlab_mesh_repo) ([v0.2.0](https://github.com/yigityargili991/haberkernlab_mesh_repo/releases/tag/v0.2.0))
+Latest CRANTb neuropil meshes we created: [haberkernlab_mesh_repo](https://github.com/yigityargili991/haberkernlab_mesh_repo) ([v0.3.0](https://github.com/yigityargili991/haberkernlab_mesh_repo/releases/tag/v0.2.0))
 
 Neuroglancer URL:
 ```

@@ -134,7 +134,8 @@ def parse_label_csv(csv_path):
                     return f.read()
             except UnicodeError:
                 continue
-        raise UnicodeDecodeError("unknown", b"", 0, 1, f"Unable to decode CSV file: {path}")
+        # latin-1 maps every byte 0x00-0xFF, so this is unreachable.
+        raise RuntimeError(f"All encoding fallbacks exhausted for {path}")
 
     def sniff_dialect(text):
         candidate_lines = []
@@ -176,6 +177,9 @@ def parse_label_csv(csv_path):
             return None
         return id_idx, name_idx
 
+    def is_separator_preamble(row):
+        return bool(row) and row[0].lower().startswith("sep=")
+
     mapping = {}
     text = read_text_with_fallbacks(csv_path)
     reader = csv.reader(io.StringIO(text), dialect=sniff_dialect(text))
@@ -185,6 +189,8 @@ def parse_label_csv(csv_path):
         if not stripped_row or not any(stripped_row):
             continue
         if stripped_row[0].startswith("#"):
+            continue
+        if column_indices is None and is_separator_preamble(stripped_row):
             continue
         if column_indices is None:
             detected = detect_columns(stripped_row)
@@ -204,6 +210,13 @@ def parse_label_csv(csv_path):
         if name == "":
             raise ValueError(f"Row missing name column: {row}")
         mapping[label_id] = name
+
+    if not mapping and text.strip():
+        logger.warning(
+            "No labels parsed from %s. If your CSV has name,id column order, "
+            "add a header row like 'name,id' or 'id,name'.",
+            csv_path,
+        )
     return mapping
 
 

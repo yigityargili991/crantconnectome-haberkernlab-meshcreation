@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -57,6 +58,7 @@ class ParseLabelCsvTest(unittest.TestCase):
         f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding=encoding)
         f.write("\n".join(lines))
         f.close()
+        self.addCleanup(os.unlink, f.name)
         return f.name
 
     def test_basic_csv(self):
@@ -83,6 +85,11 @@ class ParseLabelCsvTest(unittest.TestCase):
         path = self._write_csv(
             ["name,notes,segment_id", "ellipsoid_body,core,1", "protocerebral_bridge,midline,17"]
         )
+        result = parse_label_csv(path)
+        self.assertEqual(result, {1: "ellipsoid_body", 17: "protocerebral_bridge"})
+
+    def test_separator_preamble_does_not_disable_reordered_header_detection(self):
+        path = self._write_csv(["sep=;", "name;id", "ellipsoid_body;1", "protocerebral_bridge;17"])
         result = parse_label_csv(path)
         self.assertEqual(result, {1: "ellipsoid_body", 17: "protocerebral_bridge"})
 

@@ -146,6 +146,10 @@ MESH_DIR = "mesh"
 UNSHARDED = args.unsharded
 UINT32_MAX = np.iinfo(np.uint32).max
 
+if args.voxel_offset == [-54, -54, -3]:
+    logger.info("Using default CRANTb voxel offset [-54, -54, -3]. "
+                "Pass --voxel-offset 0 0 0 for non-CRANTb TIFFs.")
+
 
 
 def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:

@@ -129,15 +129,7 @@ Label names are auto-derived in this priority order:
 2. STL filenames (fallback for older datastacks without segment properties)
 3. Generic `{dirname}_label_{id}` fallback
 
-Use `--label-file` to provide many overrides at once from a CSV. The parser accepts common spreadsheet-exported CSVs, including UTF-8 BOMs, semicolon/tab/comma delimiters, and header rows where the ID/name columns are reordered. The file still needs one numeric ID column and one name column, for example:
-
-```csv
-id,name
-1,ellipsoid_body
-2,fan_shaped_body
-```
-
-Use `--labels` to manually override any name, and note that `--labels` takes priority over `--label-file`.
+Use `--labels` to manually override any name.
 
 ## Generated Meshes
 

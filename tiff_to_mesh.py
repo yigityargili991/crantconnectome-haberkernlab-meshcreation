@@ -14,7 +14,12 @@ from cloudvolume import CloudVolume
 from taskqueue import LocalTaskQueue
 
 import igneous.task_creation as tc
-from shared import SEGMENT_PROPS_DIR, parse_labels, write_segment_properties
+from shared import (
+    SEGMENT_PROPS_DIR,
+    build_label_names_for_inputs,
+    parse_labels,
+    write_segment_properties,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -404,16 +409,7 @@ else:
             os.remove(f)
 
 # --- Segment properties (human-readable label names) ---
-label_names = {}
-exts = {os.path.splitext(f)[1].lower() for f in input_files}
-if exts <= {'.stl'}:
-    for i, fpath in enumerate(input_files, start=1):
-        label_names[i] = os.path.splitext(os.path.basename(fpath))[0]
-else:
-    volume_name = os.path.splitext(os.path.basename(input_files[0]))[0]
-    unique_labels = sorted(set(np.unique(data).tolist()) - {0})
-    for lid in unique_labels:
-        label_names[lid] = f"{volume_name}_label_{lid}"
+label_names = build_label_names_for_inputs(input_files, data)
 if args.labels:
     label_names.update(parse_labels(args.labels))
 write_segment_properties(output_dir, label_names)

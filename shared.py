@@ -3,11 +3,9 @@ import json
 import logging
 import os
 import subprocess
+import shutil
 
 import numpy as np
-from taskqueue import LocalTaskQueue
-
-import igneous.task_creation as tc
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +114,27 @@ def parse_labels(labels_arg):
         id_str, name = item.split(':', 1)
         mapping[int(id_str)] = name
     return mapping
+
+
+def build_label_names_for_inputs(input_files, data):
+    """Build default label names for TIFF/STL inputs.
+
+    STL inputs use filenames as names. TIFF inputs preserve the underlying
+    label IDs and assign a deterministic fallback name for each non-zero label.
+    """
+    if not input_files:
+        return {}
+    label_names = {}
+    exts = {os.path.splitext(f)[1].lower() for f in input_files}
+    if exts <= {'.stl'}:
+        for i, fpath in enumerate(input_files, start=1):
+            label_names[i] = os.path.splitext(os.path.basename(fpath))[0]
+    else:
+        volume_name = os.path.splitext(os.path.basename(input_files[0]))[0]
+        unique_labels = sorted(set(np.unique(data).tolist()) - {0})
+        for lid in unique_labels:
+            label_names[int(lid)] = f"{volume_name}_label_{int(lid)}"
+    return label_names
 
 
 def parse_grouped_labels(labels_arg):
@@ -274,76 +293,163 @@ def compute_chunk_size(shape, min_chunks=8):
     return tuple(chunks)
 
 
-def generate_meshes(cloudvolume_path, mesh_dir, unsharded):
-    """Run the igneous mesh generation pipeline on an existing CloudVolume."""
+def remap_labels_sparse(data, remap):
+    """Remap a labeled volume without allocating up to max(label_id)."""
+    unique_labels, inverse = np.unique(data, return_inverse=True)
+    mapped = np.zeros(unique_labels.shape, dtype=np.uint32)
+    for idx, old_label in enumerate(unique_labels.tolist()):
+        mapped[idx] = remap.get(int(old_label), 0)
+    return mapped[inverse].reshape(data.shape)
+
+
+def prepare_clean_dir(path):
+    """Remove all existing contents of a directory while preserving the directory."""
+    os.makedirs(path, exist_ok=True)
+    existing = [n for n in os.listdir(path) if n != ".git"]
+    if existing:
+        logger.warning(
+            "Output directory '%s' is non-empty — the following will be removed: %s",
+            path,
+            ", ".join(sorted(existing)),
+        )
+    for name in existing:
+        target = os.path.join(path, name)
+        if os.path.isdir(target) and not os.path.islink(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+
+
+def publish_mesh_files(mesh_src_dir, output_dir):
+    """Publish a mesh directory as a standalone mesh dataset root."""
+    prepare_clean_dir(output_dir)
+    for name in os.listdir(mesh_src_dir):
+        src = os.path.join(mesh_src_dir, name)
+        dst = os.path.join(output_dir, name)
+        if os.path.isdir(src) and not os.path.islink(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+
+
+def attach_segment_properties_to_info(info_path, segment_properties_dir=SEGMENT_PROPS_DIR):
+    with open(info_path) as f:
+        info = json.load(f)
+    info["segment_properties"] = segment_properties_dir
+    with open(info_path, "w") as f:
+        json.dump(info, f)
+
+
+def _load_meshing_modules():
+    from taskqueue import LocalTaskQueue
+    import igneous.task_creation as tc
+    return LocalTaskQueue, tc
+
+
+def _execute_tasks(tasks):
+    LocalTaskQueue, _tc = _load_meshing_modules()
+    tq = LocalTaskQueue(parallel=4)
+    tq.insert(tasks)
+    tq.execute()
+
+
+def forge_unsharded_mesh_fragments(cloudvolume_path, mesh_dir):
+    """Run the first-pass unsharded meshing stage."""
+    _LocalTaskQueue, tc = _load_meshing_modules()
     mesh_output_dir = os.path.join(
         cloudvolume_path.replace("file://", ""), mesh_dir
     )
-    tq = LocalTaskQueue(parallel=4)
+    logger.info("Step 1: Creating unsharded mesh fragments...")
+    mesh_tasks = tc.create_meshing_tasks(
+        layer_path=cloudvolume_path,
+        mip=0,
+        shape=(256, 256, 256),
+        simplification=True,
+        max_simplification_error=40,
+        mesh_dir=mesh_dir,
+        sharded=False,
+        spatial_index=False,
+    )
+    _execute_tasks(mesh_tasks)
+    logger.info("Mesh fragments generated.")
+    return mesh_output_dir
 
+
+def finalize_unsharded_meshes(cloudvolume_path, mesh_dir):
+    """Run the second-pass unsharded multi-resolution mesh stage."""
+    _LocalTaskQueue, tc = _load_meshing_modules()
+    mesh_output_dir = os.path.join(
+        cloudvolume_path.replace("file://", ""), mesh_dir
+    )
+    logger.info("Step 2: Creating unsharded multi-resolution draco meshes...")
+    multires_tasks = tc.create_unsharded_multires_mesh_tasks(
+        cloudpath=cloudvolume_path,
+        num_lod=2,
+        mesh_dir=mesh_dir,
+        vertex_quantization_bits=16,
+        min_chunk_size=(128, 128, 128),
+    )
+    _execute_tasks(multires_tasks)
+    logger.info("Multi-resolution meshes generated.")
+
+    for f in glob.glob(os.path.join(mesh_output_dir, "*:*")):
+        os.remove(f)
+    return mesh_output_dir
+
+
+def forge_sharded_mesh_fragments(cloudvolume_path, mesh_dir):
+    """Run the first-pass sharded meshing stage."""
+    _LocalTaskQueue, tc = _load_meshing_modules()
+    mesh_output_dir = os.path.join(
+        cloudvolume_path.replace("file://", ""), mesh_dir
+    )
+    logger.info("Step 1: Creating sharded mesh fragments...")
+    mesh_tasks = tc.create_meshing_tasks(
+        layer_path=cloudvolume_path,
+        mip=0,
+        shape=(256, 256, 256),
+        simplification=True,
+        max_simplification_error=40,
+        mesh_dir=mesh_dir,
+        sharded=True,
+        spatial_index=True,
+        compress="gzip",
+    )
+    _execute_tasks(mesh_tasks)
+    logger.info("Mesh fragments generated.")
+    return mesh_output_dir
+
+
+def finalize_sharded_meshes(cloudvolume_path, mesh_dir):
+    """Run the second-pass sharded multi-resolution mesh stage."""
+    _LocalTaskQueue, tc = _load_meshing_modules()
+    mesh_output_dir = os.path.join(
+        cloudvolume_path.replace("file://", ""), mesh_dir
+    )
+    logger.info("Step 2: Creating sharded multi-resolution draco meshes...")
+    multires_tasks = tc.create_sharded_multires_mesh_tasks(
+        cloudpath=cloudvolume_path,
+        num_lod=2,
+        mesh_dir=mesh_dir,
+        vertex_quantization_bits=16,
+        min_chunk_size=(128, 128, 128),
+        draco_compression_level=7,
+        shard_index_bytes=2**13,
+        minishard_index_bytes=2**15,
+    )
+    _execute_tasks(multires_tasks)
+    logger.info("Multi-resolution meshes generated.")
+
+    for f in glob.glob(os.path.join(mesh_output_dir, "*.frags")):
+        os.remove(f)
+    return mesh_output_dir
+
+
+def generate_meshes(cloudvolume_path, mesh_dir, unsharded):
+    """Run the full igneous mesh generation pipeline on an existing CloudVolume."""
     if unsharded:
-        logger.info("Step 1: Creating unsharded mesh fragments...")
-        mesh_tasks = tc.create_meshing_tasks(
-            layer_path=cloudvolume_path,
-            mip=0,
-            shape=(256, 256, 256),
-            simplification=True,
-            max_simplification_error=40,
-            mesh_dir=mesh_dir,
-            sharded=False,
-            spatial_index=False,
-        )
-        tq.insert(mesh_tasks)
-        tq.execute()
-        logger.info("Mesh fragments generated.")
+        forge_unsharded_mesh_fragments(cloudvolume_path, mesh_dir)
+        return finalize_unsharded_meshes(cloudvolume_path, mesh_dir)
 
-        logger.info("Step 2: Creating unsharded multi-resolution draco meshes...")
-        multires_tasks = tc.create_unsharded_multires_mesh_tasks(
-            cloudpath=cloudvolume_path,
-            num_lod=2,
-            mesh_dir=mesh_dir,
-            vertex_quantization_bits=16,
-            min_chunk_size=(128, 128, 128),
-        )
-        tq.insert(multires_tasks)
-        tq.execute()
-        logger.info("Multi-resolution meshes generated.")
-
-        for pattern in ["*:*"]:
-            for f in glob.glob(os.path.join(mesh_output_dir, pattern)):
-                os.remove(f)
-    else:
-        logger.info("Step 1: Creating sharded mesh fragments...")
-        mesh_tasks = tc.create_meshing_tasks(
-            layer_path=cloudvolume_path,
-            mip=0,
-            shape=(256, 256, 256),
-            simplification=True,
-            max_simplification_error=40,
-            mesh_dir=mesh_dir,
-            sharded=True,
-            spatial_index=True,
-            compress="gzip",
-        )
-        tq.insert(mesh_tasks)
-        tq.execute()
-        logger.info("Mesh fragments generated.")
-
-        logger.info("Step 2: Creating sharded multi-resolution draco meshes...")
-        multires_tasks = tc.create_sharded_multires_mesh_tasks(
-            cloudpath=cloudvolume_path,
-            num_lod=2,
-            mesh_dir=mesh_dir,
-            vertex_quantization_bits=16,
-            min_chunk_size=(128, 128, 128),
-            draco_compression_level=7,
-            shard_index_bytes=2**13,
-            minishard_index_bytes=2**15,
-        )
-        tq.insert(multires_tasks)
-        tq.execute()
-        logger.info("Multi-resolution meshes generated.")
-
-        for pattern in ["*.frags"]:
-            for f in glob.glob(os.path.join(mesh_output_dir, pattern)):
-                os.remove(f)
+    forge_sharded_mesh_fragments(cloudvolume_path, mesh_dir)
+    return finalize_sharded_meshes(cloudvolume_path, mesh_dir)

@@ -13,14 +13,19 @@ from cloudvolume.lib import Bbox
 
 from shared import (
     MESH_DIR,
-    SEGMENT_PROPS_DIR,
     UINT32_MAX,
+    attach_segment_properties_to_info,
     compute_chunk_size,
-    generate_meshes,
+    finalize_sharded_meshes,
+    finalize_unsharded_meshes,
+    forge_sharded_mesh_fragments,
+    forge_unsharded_mesh_fragments,
     parse_grouped_exclusions,
     parse_grouped_labels,
+    publish_mesh_files,
     push_to_github,
     read_segment_properties,
+    remap_labels_sparse,
     resolve_exclusions,
     write_segment_properties,
 )
@@ -31,11 +36,11 @@ logger = logging.getLogger(__name__)
 
 def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
                      manual_labels=None, exclusions=None, source_properties=None):
-    """Merge N precomputed datastacks into a single combined datastack.
+    """Merge N precomputed datastacks into a standalone mesh dataset.
 
     Each datastack is meshed independently in its own padded volume so
     overlapping structures don't interfere with each other's mesh surfaces.
-    The per-segment mesh files are then combined into one output.
+    The per-segment mesh files are then combined into one mesh-only output.
 
     Args:
         exclusions: {dirname: set_of_old_label_ids} — labels to skip.
@@ -50,6 +55,11 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
             raise FileNotFoundError(f"Datastack directory not found: {abspath}")
         cv = CloudVolume(f"file://{abspath}", mip=0, fill_missing=True)
         sources.append((abspath, cv))
+
+    output_dir = os.path.abspath(output_dir)
+    source_paths = {abspath for abspath, _cv in sources}
+    if output_dir in source_paths:
+        raise ValueError("Output directory must be different from all input datastacks.")
 
     ref_res = sources[0][1].resolution.tolist()
     for abspath, cv in sources[1:]:
@@ -125,7 +135,7 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
                 f"so both render correctly."
             )
 
-    info = {
+    volume_info = {
         "data_type": "uint32",
         "mesh": mesh_dir,
         "num_channels": 1,
@@ -141,6 +151,8 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
     }
 
     temp_dirs = []
+    aggregate_dir = None
+    original_aggregate_dir = None
     try:
         for (abspath, cv), data, remap in zip(sources, volumes, label_map.values()):
             if not remap:
@@ -149,11 +161,7 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
             ds_name = os.path.basename(abspath)
             logger.info(f"Processing {ds_name} ({len(remap)} labels) independently...")
 
-            max_old = max(remap.keys())
-            lut = np.zeros(max_old + 1, dtype=np.uint32)
-            for old, new in remap.items():
-                lut[old] = new
-            remapped = lut[data]
+            remapped = remap_labels_sparse(data, remap)
 
             padded = np.zeros(union_shape, dtype=np.uint32)
             offset = (cv.bounds.minpt - union_min).astype(int)
@@ -161,20 +169,23 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
                 slice(int(o), int(o) + s)
                 for o, s in zip(offset, data.shape)
             )
-            mask = remapped > 0
-            padded[slices][mask] = remapped[mask]
+            padded[slices] = remapped
 
             temp_dir = tempfile.mkdtemp(prefix=f"merge_{ds_name}_")
             temp_dirs.append(temp_dir)
 
             with open(os.path.join(temp_dir, "info"), "w") as f:
-                json.dump(info, f)
+                json.dump(volume_info, f)
 
             temp_cv_path = f"file://{temp_dir}"
             temp_cv = CloudVolume(temp_cv_path, compress=False)
             temp_cv[:] = padded[:]
 
-            generate_meshes(temp_cv_path, mesh_dir, unsharded=True)
+            if unsharded:
+                forge_unsharded_mesh_fragments(temp_cv_path, mesh_dir)
+                finalize_unsharded_meshes(temp_cv_path, mesh_dir)
+            else:
+                forge_sharded_mesh_fragments(temp_cv_path, mesh_dir)
             logger.info(f"  Meshes generated for {ds_name}")
 
         if not temp_dirs:
@@ -183,30 +194,64 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
                 "Check your --exclude arguments."
             )
 
-        os.makedirs(output_dir, exist_ok=True)
-        final_mesh_dir = os.path.join(output_dir, mesh_dir)
-        if os.path.exists(final_mesh_dir):
-            shutil.rmtree(final_mesh_dir)
-        os.makedirs(final_mesh_dir)
+        if unsharded:
+            aggregate_dir = tempfile.mkdtemp(prefix="merge_output_unsharded_")
+            shutil.copy2(
+                os.path.join(temp_dirs[0], mesh_dir, "info"),
+                os.path.join(aggregate_dir, "info"),
+            )
+            for temp_dir in temp_dirs:
+                temp_mesh = os.path.join(temp_dir, mesh_dir)
+                for fname in os.listdir(temp_mesh):
+                    if fname == "info":
+                        continue
+                    shutil.copy2(
+                        os.path.join(temp_mesh, fname),
+                        os.path.join(aggregate_dir, fname),
+                    )
+        else:
+            aggregate_dir = tempfile.mkdtemp(prefix="merge_output_sharded_")
+            with open(os.path.join(aggregate_dir, "info"), "w") as f:
+                json.dump(volume_info, f)
+            aggregate_mesh_dir = os.path.join(aggregate_dir, mesh_dir)
+            os.makedirs(aggregate_mesh_dir, exist_ok=True)
+            shutil.copy2(
+                os.path.join(temp_dirs[0], mesh_dir, "info"),
+                os.path.join(aggregate_mesh_dir, "info"),
+            )
+            for temp_dir in temp_dirs:
+                temp_mesh = os.path.join(temp_dir, mesh_dir)
+                for fname in os.listdir(temp_mesh):
+                    if fname == "info":
+                        continue
+                    src = os.path.join(temp_mesh, fname)
+                    dst = os.path.join(aggregate_mesh_dir, fname)
+                    if os.path.isdir(src) and not os.path.islink(src):
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(src, dst)
+            finalize_sharded_meshes(f"file://{aggregate_dir}", mesh_dir)
 
-        shutil.copy2(
-            os.path.join(temp_dirs[0], mesh_dir, "info"),
-            os.path.join(final_mesh_dir, "info"),
-        )
+            original_aggregate_dir = aggregate_dir
+            sharded_publish_dir = tempfile.mkdtemp(prefix="merge_publish_sharded_")
+            for fname in os.listdir(aggregate_mesh_dir):
+                src = os.path.join(aggregate_mesh_dir, fname)
+                dst = os.path.join(sharded_publish_dir, fname)
+                if os.path.isdir(src) and not os.path.islink(src):
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+            aggregate_dir = sharded_publish_dir
 
-        for temp_dir in temp_dirs:
-            temp_mesh = os.path.join(temp_dir, mesh_dir)
-            for fname in os.listdir(temp_mesh):
-                if fname == "info":
-                    continue
-                shutil.copy2(
-                    os.path.join(temp_mesh, fname),
-                    os.path.join(final_mesh_dir, fname),
-                )
+        publish_mesh_files(aggregate_dir, output_dir)
 
     finally:
         for temp_dir in temp_dirs:
             shutil.rmtree(temp_dir, ignore_errors=True)
+        if aggregate_dir:
+            shutil.rmtree(aggregate_dir, ignore_errors=True)
+        if original_aggregate_dir and original_aggregate_dir != aggregate_dir:
+            shutil.rmtree(original_aggregate_dir, ignore_errors=True)
 
     label_names = {}
     for (abspath, _cv), remap in zip(sources, label_map.values()):
@@ -235,14 +280,10 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
                     if old_id in remap:
                         label_names[remap[old_id]] = name
 
-    info["segment_properties"] = SEGMENT_PROPS_DIR
-    with open(os.path.join(output_dir, "info"), "w") as f:
-        json.dump(info, f)
-
     write_segment_properties(output_dir, label_names)
-
-    cv_final = CloudVolume(f"file://{os.path.abspath(output_dir)}")
-    logger.info(f"Mesh info: {cv_final.mesh.meta.info}")
+    attach_segment_properties_to_info(os.path.join(output_dir, "info"))
+    with open(os.path.join(output_dir, "info")) as f:
+        logger.info(f"Mesh info: {json.load(f)}")
 
     label_map_path = os.path.join(output_dir, "label_map.json")
     with open(label_map_path, "w") as f:
@@ -262,7 +303,7 @@ def main():
     )
     parser.add_argument(
         '--out', required=True,
-        help='Output directory for the merged datastack'
+        help='Output directory for the merged standalone mesh dataset'
     )
     parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
     parser.add_argument(

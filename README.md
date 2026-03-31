@@ -18,7 +18,7 @@ uv sync
 python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
                        --out <your output directory> \
                        --res <resolution of your mesh> \
-                       --unsharded \
+                       --label-file ./labels/neuropils.csv \
                        --setgit              # or --push <repo_name>
 ```
 
@@ -29,8 +29,9 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
 | `--d` | Directory containing your 3D TIFF/STL file(s), or path to a `.tif`/`.stl` file directly (required) | - |
 | `--out` | Base output directory; files are written to `<out>/output_volume/` | Same as `--d` (parent directory if `--d` is a file) |
 | `--res` | Output resolution in nm for aligned meshes (three integers) | `800 800 840` |
-| `--voxel-offset` | Override the voxel offset for TIFF inputs | `0 0 0` |
+| `--voxel-offset` | Override the voxel offset for TIFF inputs | `-54 -54 -3` |
 | `--unsharded` | Use [unsharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#unsharded-storage-of-multi-resolution-mesh-manifest) mesh format (default is [sharded](https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md#sharded-storage-of-multi-resolution-mesh-manifest)) | Sharded |
+| `--label-file` | CSV file with segment names (`id,name`); accepts common spreadsheet-exported CSVs | None |
 | `--labels` | Manual segment names like `1:ellipsoid_body 2:fan_shaped_body` | Auto-derived from TIFF labels or STL filenames |
 | `--setgit` | Initialize a git repo in output for Neuroglancer | Disabled |
 | `--push REPO_NAME` | Create a new public GitHub repo, initialize git if needed, push mesh output, and print Neuroglancer raw link (requires `gh` CLI; implies `--setgit`) | Disabled |
@@ -41,6 +42,7 @@ python tiff_to_mesh.py --d <directory or path to your 3d tiff file> \
 python tiff_to_mesh.py --d ./my_segmentation.tif \
                        --out ./meshes \
                        --res 800 800 840 \
+                       --label-file ./neuropil_labels.csv \
                        --setgit
 ```
 
@@ -65,7 +67,7 @@ https://raw.githubusercontent.com/<username>/<repo>/<commit>/mesh/|neuroglancer-
 
 The voxel offset is baked into the mesh metadata by the tool:
 
-- **TIFF inputs**: the default voxel offset is `0 0 0`, or the value passed via `--voxel-offset`.
+- **TIFF inputs**: the default voxel offset is `-54 -54 -3` for CRANTb atlas alignment, or the value passed via `--voxel-offset`.
 - **STL inputs**: the original physical position is preserved.
 
 No manual source transform translation is required in Neuroglancer.
@@ -75,6 +77,8 @@ No manual source transform translation is required in Neuroglancer.
 ## Merging Datastacks
 
 Use `merge_datastacks.py` to combine multiple precomputed datastacks (TIFF-sourced or STL-sourced) into a single standalone mesh dataset. Each source is meshed independently so overlapping structures don't interfere with each other's mesh surfaces.
+
+**Important:** `--unsharded` is required for merge. The sharded format names mesh fragments by chunk coordinates, causing sources to overwrite each other since they share the same padded volume shape. Unsharded format names files by segment ID, which is unique across sources.
 
 ```bash
 python merge_datastacks.py stack_A stack_B \
@@ -88,7 +92,7 @@ python merge_datastacks.py stack_A stack_B \
 |------|-------------|---------|
 | `datastacks` | Two or more datastack directories to merge (positional) | - |
 | `--out` | Output directory for the merged standalone mesh dataset (required) | - |
-| `--unsharded` | Use unsharded mesh format | Sharded |
+| `--unsharded` | **Required for merge.** Use unsharded mesh format | Sharded |
 | `--labels` | Manual segment names grouped by source dir (e.g. `--labels stack_A 1:body 2:dendrite`) | Auto-derived from source segment_properties or filenames |
 | `--exclude` | Exclude segments by ID or name, grouped by source dir (e.g. `--exclude stack_A 1 3 stack_B PB`) | None |
 | `--setgit` | Initialize git repo in output directory | Disabled |
@@ -125,7 +129,15 @@ Label names are auto-derived in this priority order:
 2. STL filenames (fallback for older datastacks without segment properties)
 3. Generic `{dirname}_label_{id}` fallback
 
-Use `--labels` to manually override any name.
+Use `--label-file` to provide many overrides at once from a CSV. The parser accepts common spreadsheet-exported CSVs, including UTF-8 BOMs, semicolon/tab/comma delimiters, and header rows where the ID/name columns are reordered. The file still needs one numeric ID column and one name column, for example:
+
+```csv
+id,name
+1,ellipsoid_body
+2,fan_shaped_body
+```
+
+Use `--labels` to manually override any name, and note that `--labels` takes priority over `--label-file`.
 
 ## Generated Meshes
 

@@ -1,7 +1,9 @@
 import glob
+import io
 import json
 import logging
 import os
+import re
 import subprocess
 import shutil
 
@@ -113,6 +115,95 @@ def parse_labels(labels_arg):
             raise ValueError(f"Invalid label format '{item}', expected ID:NAME (e.g. 1:ellipsoid_body)")
         id_str, name = item.split(':', 1)
         mapping[int(id_str)] = name
+    return mapping
+
+
+def parse_label_csv(csv_path):
+    """Parse a CSV file with id,name columns into a {int: str} dict.
+
+    Spreadsheet-exported CSVs are tolerated: UTF-8 BOMs, common spreadsheet
+    encodings, alternate delimiters, and reordered header columns.
+    Blank lines and lines starting with '#' are ignored.
+    """
+    import csv
+
+    def read_text_with_fallbacks(path):
+        for encoding in ("utf-8-sig", "utf-16", "cp1252", "latin-1"):
+            try:
+                with open(path, newline="", encoding=encoding) as f:
+                    return f.read()
+            except UnicodeError:
+                continue
+        raise UnicodeDecodeError("unknown", b"", 0, 1, f"Unable to decode CSV file: {path}")
+
+    def sniff_dialect(text):
+        candidate_lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            candidate_lines.append(line)
+            if len(candidate_lines) >= 5:
+                break
+        sample = "\n".join(candidate_lines)
+        if sample:
+            try:
+                return csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            except csv.Error:
+                pass
+
+        class DefaultDialect(csv.Dialect):
+            delimiter = ","
+            quotechar = '"'
+            doublequote = True
+            skipinitialspace = True
+            lineterminator = "\n"
+            quoting = csv.QUOTE_MINIMAL
+
+        return DefaultDialect
+
+    def normalize_header(value):
+        return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+    def detect_columns(row):
+        normalized = [normalize_header(cell) for cell in row]
+        id_aliases = {"id", "label_id", "segment_id"}
+        name_aliases = {"name", "label", "label_name", "segment_name"}
+        try:
+            id_idx = next(i for i, cell in enumerate(normalized) if cell in id_aliases)
+            name_idx = next(i for i, cell in enumerate(normalized) if cell in name_aliases)
+        except StopIteration:
+            return None
+        return id_idx, name_idx
+
+    mapping = {}
+    text = read_text_with_fallbacks(csv_path)
+    reader = csv.reader(io.StringIO(text), dialect=sniff_dialect(text))
+    column_indices = None
+    for row in reader:
+        stripped_row = [cell.strip() for cell in row]
+        if not stripped_row or not any(stripped_row):
+            continue
+        if stripped_row[0].startswith("#"):
+            continue
+        if column_indices is None:
+            detected = detect_columns(stripped_row)
+            if detected is not None:
+                column_indices = detected
+                continue
+            column_indices = (0, 1)
+
+        id_idx, name_idx = column_indices
+        if len(stripped_row) <= max(id_idx, name_idx):
+            raise ValueError(f"Row missing required columns: {row}")
+        try:
+            label_id = int(stripped_row[id_idx])
+        except ValueError:
+            continue
+        name = stripped_row[name_idx]
+        if name == "":
+            raise ValueError(f"Row missing name column: {row}")
+        mapping[label_id] = name
     return mapping
 
 

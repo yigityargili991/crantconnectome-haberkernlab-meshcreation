@@ -253,6 +253,8 @@ def merge_datastacks(datastack_dirs, output_dir, mesh_dir, unsharded,
         if original_aggregate_dir and original_aggregate_dir != aggregate_dir:
             shutil.rmtree(original_aggregate_dir, ignore_errors=True)
 
+    # TODO: improve label UX — e.g. accept a CSV/JSON file for labels,
+    # or print the final label table and let the user edit before writing.
     label_names = {}
     for (abspath, _cv), remap in zip(sources, label_map.values()):
         ds_name = os.path.basename(abspath)

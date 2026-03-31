@@ -17,6 +17,7 @@ import igneous.task_creation as tc
 from shared import (
     SEGMENT_PROPS_DIR,
     build_label_names_for_inputs,
+    parse_label_csv,
     parse_labels,
     write_segment_properties,
 )
@@ -122,11 +123,15 @@ parser.add_argument(
     help='Base output directory; files are written to <out>/<input_name> (default: same as input directory)'
 )
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
-parser.add_argument('--voxel-offset', nargs=3, type=int, default=None, metavar=('X', 'Y', 'Z'), help='Voxel offset for TIFF inputs (default: 0 0 0). STL inputs derive offset from geometry.')
+parser.add_argument('--voxel-offset', nargs=3, type=int, default=[-54, -54, -3], metavar=('X', 'Y', 'Z'), help='Voxel offset for TIFF inputs (default: -54 -54 -3 for CRANTb atlas alignment). STL inputs derive offset from geometry.')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
 parser.add_argument(
     '--labels', nargs='+', metavar='ID:NAME', default=None,
     help='Manual segment names, e.g. --labels 1:ellipsoid_body 2:fan_shaped_body (overrides auto-derived names)'
+)
+parser.add_argument(
+    '--label-file', default=None, metavar='CSV',
+    help='CSV file with id,name columns for segment names (overrides auto-derived names, --labels takes priority)'
 )
 git_group = parser.add_mutually_exclusive_group()
 git_group.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
@@ -410,6 +415,8 @@ else:
 
 # --- Segment properties (human-readable label names) ---
 label_names = build_label_names_for_inputs(input_files, data)
+if args.label_file:
+    label_names.update(parse_label_csv(args.label_file))
 if args.labels:
     label_names.update(parse_labels(args.labels))
 write_segment_properties(output_dir, label_names)

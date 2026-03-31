@@ -70,6 +70,59 @@ No manual source transform translation is required in Neuroglancer.
 
 
 
+## Merging Datastacks
+
+Use `merge_datastacks.py` to combine multiple precomputed datastacks (TIFF-sourced or STL-sourced) into a single merged datastack. Each source is meshed independently so overlapping structures don't interfere with each other's mesh surfaces.
+
+```bash
+python merge_datastacks.py stack_A stack_B \
+    --out ./merged \
+    --unsharded
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `datastacks` | Two or more datastack directories to merge (positional) | - |
+| `--out` | Output directory for the merged datastack (required) | - |
+| `--unsharded` | Use unsharded mesh format | Sharded |
+| `--labels` | Manual segment names grouped by source dir (e.g. `--labels stack_A 1:body 2:dendrite`) | Auto-derived from source segment_properties or filenames |
+| `--exclude` | Exclude segments by ID or name, grouped by source dir (e.g. `--exclude stack_A 1 3 stack_B PB`) | None |
+| `--setgit` | Initialize git repo in output directory | Disabled |
+| `--push REPO_NAME` | Create GitHub repo, push output, print Neuroglancer link | Disabled |
+
+### Excluding Segments
+
+You can exclude specific segments from any source by label ID or name:
+
+```bash
+python merge_datastacks.py stack_A stack_B \
+    --out ./merged \
+    --exclude stack_A 2 stack_B PB
+```
+
+Name-based exclusion (e.g. `PB`) is resolved via the source's `segment_properties/info`. If the source has no segment properties, use the numeric label ID instead.
+
+### Overriding a Mesh
+
+To replace a mesh (e.g. swap the PB mesh from stack_A with a new version from stack_B), exclude the old one and include the new:
+
+```bash
+python merge_datastacks.py stack_A stack_B_new_pb \
+    --out ./merged \
+    --exclude stack_A PB
+```
+
+### Label Names
+
+Label names are auto-derived in this priority order:
+1. Source `segment_properties/info` (works for both TIFF and STL origins)
+2. STL filenames (fallback for older datastacks without segment properties)
+3. Generic `{dirname}_label_{id}` fallback
+
+Use `--labels` to manually override any name.
+
 ## Generated Meshes
 
 Latest CRANTb neuropil meshes we created: [haberkernlab_mesh_repo](https://github.com/yigityargili991/haberkernlab_mesh_repo) ([v0.2.0](https://github.com/yigityargili991/haberkernlab_mesh_repo/releases/tag/v0.2.0))

@@ -1,3 +1,4 @@
+# TODO: refactor to import shared functions (push_to_github, generate_meshes, etc.) from shared.py
 import argparse
 import logging
 import os
@@ -13,6 +14,7 @@ from cloudvolume import CloudVolume
 from taskqueue import LocalTaskQueue
 
 import igneous.task_creation as tc
+from shared import SEGMENT_PROPS_DIR, parse_labels, write_segment_properties
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -115,7 +117,12 @@ parser.add_argument(
     help='Base output directory; files are written to <out>/<input_name> (default: same as input directory)'
 )
 parser.add_argument('--res', nargs=3, type=int, default=[800, 800, 840], metavar=('X', 'Y', 'Z'), help='Output resolution in nm for aligned meshes (default: 800 800 840)')
+parser.add_argument('--voxel-offset', nargs=3, type=int, default=None, metavar=('X', 'Y', 'Z'), help='Voxel offset for TIFF inputs (default: 0 0 0). STL inputs derive offset from geometry.')
 parser.add_argument('--unsharded', action='store_true', help='Use unsharded format (default: sharded)')
+parser.add_argument(
+    '--labels', nargs='+', metavar='ID:NAME', default=None,
+    help='Manual segment names, e.g. --labels 1:ellipsoid_body 2:fan_shaped_body (overrides auto-derived names)'
+)
 git_group = parser.add_mutually_exclusive_group()
 git_group.add_argument('--setgit', action='store_true', help='Initialize git repo in output directory')
 git_group.add_argument('--push', metavar='REPO_NAME', default=None,
@@ -182,6 +189,7 @@ class MeshEntryLabels:
     file_paths: list
     resolution: tuple
     min_chunks: int = 8
+    voxel_offset_override: list = None
 
     _CHUNK_CANDIDATES = (32, 64, 128)
 
@@ -191,7 +199,7 @@ class MeshEntryLabels:
             if len(self.file_paths) != 1:
                 raise ValueError("Only one TIFF file supported at a time")
             self.data = self._load_tiff(self.file_paths[0])
-            self.voxel_offset = [-(s // 2) for s in self.data.shape]
+            self.voxel_offset = self.voxel_offset_override or [0, 0, 0]
         elif exts <= {'.stl'}:
             self.data = self._load_stls()
             # voxel_offset set in _load_stls from global_min
@@ -310,7 +318,7 @@ cloudvolume_path = f"file://{output_dir}"
 if os.path.exists(mesh_output_dir):
     shutil.rmtree(mesh_output_dir)
 
-entry = MeshEntryLabels(file_paths=input_files, resolution=RESOLUTION)
+entry = MeshEntryLabels(file_paths=input_files, resolution=RESOLUTION, voxel_offset_override=args.voxel_offset)
 data = entry.data
 info = entry.build_info()
 
@@ -394,6 +402,28 @@ else:
     for pattern in ["*.frags"]:
         for f in glob.glob(os.path.join(mesh_output_dir, pattern)):
             os.remove(f)
+
+# --- Segment properties (human-readable label names) ---
+label_names = {}
+exts = {os.path.splitext(f)[1].lower() for f in input_files}
+if exts <= {'.stl'}:
+    for i, fpath in enumerate(input_files, start=1):
+        label_names[i] = os.path.splitext(os.path.basename(fpath))[0]
+else:
+    volume_name = os.path.splitext(os.path.basename(input_files[0]))[0]
+    unique_labels = sorted(set(np.unique(data).tolist()) - {0})
+    for lid in unique_labels:
+        label_names[lid] = f"{volume_name}_label_{lid}"
+if args.labels:
+    label_names.update(parse_labels(args.labels))
+write_segment_properties(output_dir, label_names)
+
+# Add segment_properties ref to info and rewrite
+with open(os.path.join(output_dir, "info")) as f:
+    info_on_disk = json.load(f)
+info_on_disk["segment_properties"] = SEGMENT_PROPS_DIR
+with open(os.path.join(output_dir, "info"), "w") as f:
+    json.dump(info_on_disk, f)
 
 cv = CloudVolume(cloudvolume_path)
 logger.info(f"Mesh info: {cv.mesh.meta.info}")

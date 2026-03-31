@@ -36,3 +36,4 @@ output_volume/
 # Temporary files
 *.tmp
 *.temp
+/.claude

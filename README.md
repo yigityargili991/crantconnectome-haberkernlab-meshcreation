@@ -53,10 +53,10 @@ When using `--push`, the raw link is printed automatically. If you only used `--
 After running with `--setgit`, push the generated mesh to GitHub. Then add it to your Neuroglancer state:
 
 1. Click the **+** button to add a new source
-2. Paste the raw GitHub content URL pointing to your mesh directory:
+2. Paste the raw GitHub content URL pointing to your published output root:
 
 ```
-https://raw.githubusercontent.com/<username>/<repo>/<commit>/mesh/|neuroglancer-precomputed:
+https://raw.githubusercontent.com/<username>/<repo>/<commit>/|neuroglancer-precomputed:
 ```
 
 ![Neuroglancer Layers](readme_images/neuroglancer_layers.png)
@@ -137,7 +137,7 @@ Latest CRANTb neuropil meshes we created: [haberkernlab_mesh_repo](https://githu
 
 Neuroglancer URL:
 ```
-https://raw.githubusercontent.com/yigityargili991/haberkernlab_mesh_repo/54d7b1daaa53f23acc14ff34d6c2e728ad6e9254/mesh/|neuroglancer-precomputed:
+https://raw.githubusercontent.com/yigityargili991/haberkernlab_mesh_repo/54d7b1daaa53f23acc14ff34d6c2e728ad6e9254/|neuroglancer-precomputed:
 ```
 
 ## Output Structure

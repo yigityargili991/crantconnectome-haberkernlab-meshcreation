@@ -9,7 +9,34 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared import build_label_names_for_inputs, parse_label_csv, parse_labels, remap_labels_sparse
+from shared import (
+    build_label_names_for_inputs,
+    build_neuroglancer_raw_link,
+    parse_label_csv,
+    parse_labels,
+    remap_labels_sparse,
+)
+
+
+class BuildNeuroglancerRawLinkTest(unittest.TestCase):
+    def test_builds_repo_root_url_with_commit_trailing_slash(self):
+        result = build_neuroglancer_raw_link(
+            "yigityargili991/smp_slp_sip_mesh_v0",
+            "40ba5a85393e6848ef8c3d02d2bcb0e4e02514f0",
+        )
+
+        self.assertEqual(
+            result,
+            "https://raw.githubusercontent.com/"
+            "yigityargili991/smp_slp_sip_mesh_v0/"
+            "40ba5a85393e6848ef8c3d02d2bcb0e4e02514f0/"
+            "|neuroglancer-precomputed:",
+        )
+
+    def test_does_not_point_to_mesh_subdirectory(self):
+        result = build_neuroglancer_raw_link("owner/repo", "abc123")
+
+        self.assertNotIn("/mesh/", result)
 
 
 class BuildLabelNamesForInputsTest(unittest.TestCase):

@@ -16,6 +16,7 @@ from taskqueue import LocalTaskQueue
 import igneous.task_creation as tc
 from shared import (
     SEGMENT_PROPS_DIR,
+    build_neuroglancer_raw_link,
     build_label_names_for_inputs,
     parse_label_csv,
     parse_labels,
@@ -108,10 +109,7 @@ def push_to_github(output_dir: str, repo_name: str):
     )
     commit_hash = hash_result.stdout.strip()
 
-    raw_link = (
-        f"https://raw.githubusercontent.com/{full_repo}/"
-        f"{commit_hash}/mesh/|neuroglancer-precomputed:"
-    )
+    raw_link = build_neuroglancer_raw_link(full_repo, commit_hash)
     logger.info(f"Neuroglancer source URL:\n{raw_link}")
 
 

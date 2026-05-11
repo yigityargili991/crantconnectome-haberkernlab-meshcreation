@@ -29,6 +29,13 @@ def get_github_username() -> str:
     return result.stdout.strip()
 
 
+def build_neuroglancer_raw_link(full_repo: str, commit_hash: str) -> str:
+    return (
+        f"https://raw.githubusercontent.com/{full_repo}/"
+        f"{commit_hash}/|neuroglancer-precomputed:"
+    )
+
+
 def push_to_github(output_dir: str, repo_name: str, *, force: bool = False):
     username = get_github_username()
     full_repo = f"{username}/{repo_name}"
@@ -94,10 +101,7 @@ def push_to_github(output_dir: str, repo_name: str, *, force: bool = False):
     )
     commit_hash = hash_result.stdout.strip()
 
-    raw_link = (
-        f"https://raw.githubusercontent.com/{full_repo}/"
-        f"{commit_hash}|neuroglancer-precomputed:"
-    )
+    raw_link = build_neuroglancer_raw_link(full_repo, commit_hash)
     logger.info(f"Neuroglancer source URL:\n{raw_link}")
 
 

@@ -138,19 +138,8 @@ its raw content URL as a `neuroglancer-precomputed:` source. Passing
 `push="repo_name"`/`--push` automates the repo creation, push, and link printing.
 The baked-in voxel offset means no manual source transform is required.
 
----
-
-The functional and object-oriented entry points share the same implementations:
-
-``tiff_to_mesh(...)`` / ``MeshConverter(...).run()``
-    Convert TIFF or STL inputs to a Neuroglancer precomputed mesh dataset.
-
-``merge_datastacks(...)`` / ``DatastackMerger(...).run()``
-    Merge independently meshed datastacks.
-
-``replace_labels(...)`` / ``DatastackMerger(...).replace(...)``
-    Exclude selected labels from a base stack and substitute geometry from a
-    replacement stack.
+The symbols below are the full public API; each links to its detailed
+parameter, return, and error documentation.
 """
 
 from .conversion import (

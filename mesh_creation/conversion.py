@@ -1,4 +1,14 @@
-"""Convert TIFF or STL inputs into a Neuroglancer precomputed mesh dataset."""
+"""Convert TIFF or STL inputs into a Neuroglancer precomputed mesh dataset.
+
+A TIFF segmentation (one integer label per voxel) or a set of STL surfaces is
+loaded into a ``uint32`` label volume, written as a Neuroglancer precomputed
+segmentation, and meshed with Igneous into multi-resolution Draco meshes. The
+CRANTb-aligned voxel offset is baked into the volume ``info`` so the result
+loads at the correct position in Neuroglancer with no manual transform.
+
+Use `tiff_to_mesh` (alias `create_mesh`) for the one-call functional form, or
+`MeshConverter` when you want to build the configuration first and run it later.
+"""
 
 import argparse
 import json
@@ -33,14 +43,44 @@ from shared import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_RESOLUTION = (800, 800, 840)
+"""Default output voxel size in nanometers, as ``(X, Y, Z)``."""
+
 DEFAULT_VOXEL_OFFSET = (-54, -54, -3)
+"""Default voxel offset for TIFF inputs, in voxels, for CRANTb atlas alignment.
+
+Baked into the volume ``info`` so the mesh loads in the right place in
+Neuroglancer. Pass ``(0, 0, 0)`` for non-CRANTb TIFFs; STL inputs ignore this
+and derive their offset from geometry.
+"""
+
 SUPPORTED_EXTENSIONS = (".tif", ".tiff", ".stl")
+"""Input file extensions accepted by the converter."""
 
 LabelOverrides = Union[Mapping[int, str], Sequence[str]]
 
 
 def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
-    """Return a uint32 label volume without silently changing label values."""
+    """Return a ``uint32`` label volume without silently changing label values.
+
+    Segmentation labels must be ``uint32`` for the precomputed format. This
+    converts an array to ``uint32`` only when doing so is lossless: booleans and
+    in-range integers convert directly, and float arrays convert only if every
+    value is finite and integral. Anything that would corrupt label identities
+    (a non-integer float, a value outside the ``uint32`` range, an unsupported
+    dtype) raises instead of being coerced.
+
+    Args:
+        array: Segmentation labels of any integer, boolean, or float dtype.
+
+    Returns:
+        The array as ``uint32`` (a view when already ``uint32``, otherwise a
+        converted copy).
+
+    Raises:
+        ValueError: If a float array holds NaN/inf or non-integer values, or if
+            any value falls outside ``[0, UINT32_MAX]``.
+        TypeError: If the array dtype is not integer, boolean, or float.
+    """
     if array.dtype == np.uint32:
         return array
 
@@ -86,8 +126,23 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
 class MeshEntryLabels:
     """Load TIFF or STL inputs into a uint32 ``(X, Y, Z)`` label volume.
 
-    TIFFs use ``voxel_offset_override`` (default ``(0, 0, 0)``); STLs derive
-    the voxel offset from their geometry so physical position is preserved.
+    Construction does the loading: the resulting ``data`` array and
+    ``voxel_offset`` are available on the instance once it is created, and
+    `build_info` turns them into a Neuroglancer ``info`` dict. A single TIFF
+    becomes one labelled volume and uses ``voxel_offset_override`` (default
+    ``(0, 0, 0)``); one or more STLs are voxelized into a shared volume with one
+    label ID per file, and the offset is derived from their geometry so physical
+    position is preserved. TIFF and STL inputs cannot be mixed.
+
+    Attributes:
+        file_paths: Input file paths; either exactly one ``.tif``/``.tiff`` or
+            one or more ``.stl`` files.
+        resolution: Output voxel size in nm, as ``(X, Y, Z)``.
+        min_chunks: Lower bound on the number of chunks per axis used to pick
+            the precomputed chunk size.
+        voxel_offset_override: Voxel offset for TIFF inputs; ignored for STLs.
+        data: The loaded ``uint32`` label volume (set during construction).
+        voxel_offset: The volume's voxel offset (set during construction).
     """
 
     file_paths: Sequence[AnyPath]
@@ -251,8 +306,28 @@ def _resolved_output_dir(input_path: str, output_base: Optional[str]) -> str:
 class MeshConverter:
     """Configurable TIFF/STL to Neuroglancer mesh conversion.
 
-    ``output_dir`` is a base directory; the input name is appended to it and
-    ``run`` returns that final dataset directory.
+    Holds every conversion option as an attribute so a run can be configured
+    once and executed with `run` (aliased as ``convert``). `tiff_to_mesh` is the
+    thin functional wrapper around this class. ``output_dir`` is treated as a
+    base directory: the input's name is appended to it and `run` returns that
+    final dataset directory.
+
+    Attributes:
+        input_path: A ``.tif``/``.tiff``/``.stl`` file, or a directory
+            containing exactly one such file.
+        output_dir: Base output directory; the input name is appended. Defaults
+            to the input's own directory when ``None``.
+        resolution: Output voxel size in nm, as ``(X, Y, Z)``.
+        voxel_offset: Voxel offset for TIFF inputs (see `DEFAULT_VOXEL_OFFSET`);
+            ignored for STL inputs.
+        unsharded: Emit the unsharded mesh format instead of the sharded default.
+        labels: Segment-name overrides as ``{id: name}`` or ``"ID:NAME"``
+            strings; highest priority.
+        label_file: CSV of ``id,name`` segment names; overridden by ``labels``.
+        setgit: Initialize a git repo in the output directory.
+        push: GitHub repo name to create and push to; implies ``setgit`` and is
+            mutually exclusive with it.
+        mesh_dir: Name of the mesh subdirectory within the dataset.
     """
 
     input_path: AnyPath
@@ -267,7 +342,20 @@ class MeshConverter:
     mesh_dir: str = MESH_DIR
 
     def run(self) -> str:
-        """Voxelize the input, mesh it, write segment properties; return the dataset dir."""
+        """Run the full conversion and return the dataset directory.
+
+        Loads the input into a label volume, writes the precomputed
+        segmentation, meshes it (sharded by default, unsharded if configured),
+        attaches segment properties, and optionally sets up or pushes a git
+        repo. Existing mesh output is regenerated.
+
+        Returns:
+            Path to the dataset directory (``<output_dir>/<input-name>``).
+
+        Raises:
+            ValueError: If ``resolution`` or ``voxel_offset`` is not length 3,
+                or if both ``setgit`` and ``push`` are set.
+        """
         input_path = os.fspath(self.input_path)
         output_base = (
             os.fspath(self.output_dir) if self.output_dir is not None else None
@@ -424,7 +512,35 @@ def tiff_to_mesh(
     push: Optional[str] = None,
     mesh_dir: str = MESH_DIR,
 ) -> str:
-    """Convert a TIFF/STL input to a Neuroglancer mesh dataset; return its directory."""
+    """Convert a TIFF/STL input to a Neuroglancer mesh dataset.
+
+    One-call wrapper around `MeshConverter`; ``create_mesh`` is an exact alias.
+    See `MeshConverter` for the object-oriented form.
+
+    Args:
+        input_path: A ``.tif``/``.tiff``/``.stl`` file, or a directory holding
+            exactly one such file.
+        output_dir: Base output directory; the input name is appended. Defaults
+            to the input's own directory when ``None``.
+        resolution: Output voxel size in nm, as ``(X, Y, Z)``.
+        voxel_offset: Voxel offset for TIFF inputs (see `DEFAULT_VOXEL_OFFSET`);
+            ignored for STL inputs, which derive it from geometry.
+        unsharded: Emit the unsharded mesh format instead of the sharded default.
+        labels: Segment-name overrides as ``{id: name}`` or ``"ID:NAME"``
+            strings; takes priority over ``label_file`` and auto-derived names.
+        label_file: CSV of ``id,name`` segment names.
+        setgit: Initialize a git repo in the output directory.
+        push: GitHub repo name to create and push to; implies ``setgit`` and is
+            mutually exclusive with it.
+        mesh_dir: Name of the mesh subdirectory within the dataset.
+
+    Returns:
+        Path to the dataset directory (``<output_dir>/<input-name>``).
+
+    Raises:
+        ValueError: If ``resolution`` or ``voxel_offset`` is not length 3, or if
+            both ``setgit`` and ``push`` are set.
+    """
     return MeshConverter(
         input_path=input_path,
         output_dir=output_dir,

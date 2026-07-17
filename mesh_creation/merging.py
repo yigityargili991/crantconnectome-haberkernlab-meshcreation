@@ -1,4 +1,23 @@
-"""Neuroglancer datastack merging and label replacement workflows."""
+"""Neuroglancer datastack merging and label replacement workflows.
+
+Combine two or more precomputed datastacks into a single standalone mesh
+dataset. Each source is meshed independently, so surfaces from overlapping
+structures never interfere, and every kept label is assigned a fresh contiguous
+output ID. Sources may be TIFF-derived or STL-derived, and labels can be
+selected, excluded, or renamed per source, addressed either by numeric ID or by
+name from the source's segment properties.
+
+The two operations are:
+
+- `merge_datastacks` (`DatastackMerger.run`) -- merge all inputs, minus any
+  excluded labels.
+- `replace_labels` (`DatastackMerger.replace`) -- swap a group of labels in a
+  base stack for geometry from a replacement stack.
+
+The safe format for independent-source merges is unsharded (the library
+default), because sharded fragments from different sources can collide on
+shared chunk coordinates.
+"""
 
 import argparse
 import json
@@ -580,12 +599,43 @@ def merge_datastacks(
 ) -> dict:
     """Merge precomputed datastacks into one standalone mesh dataset.
 
-    ``labels``, ``exclude``, and ``include`` are grouped by source; a group key
-    is an absolute source path or a basename unique among the inputs, and label
-    selectors may be numeric IDs or names from segment properties. Sources are
-    meshed independently and assigned contiguous output IDs in source order and
-    ascending input-label order. Returns (and writes to ``label_map.json``) a
-    map from each source path to its ``old_id -> new_id`` remapping.
+    Each source is meshed independently and its kept labels are assigned
+    contiguous output IDs, numbered in input-stack order and then ascending
+    source-label order. The result is written to ``output_dir`` as a mesh-only
+    dataset (``info``, mesh payloads, ``segment_properties/``, and
+    ``label_map.json``).
+
+    The ``labels``, ``exclude``, and ``include`` mappings are grouped by source:
+    a group key is an absolute source path or a basename unique among the
+    inputs, and each label selector is a numeric ID or a name from that source's
+    segment properties.
+
+    Args:
+        datastack_dirs: Two or more datastack directories to merge.
+        output_dir: Directory for the merged dataset; must not be inside any
+            source.
+        unsharded: Use the unsharded format. Defaults to ``True``, the safe
+            choice for independent-source merges; pass ``False`` only for the
+            legacy sharded behavior.
+        mesh_dir: Name of the mesh subdirectory within each source.
+        labels: Per-source name overrides, ``{source: {id: name}}``.
+        exclude: Per-source labels to drop, ``{source: [id_or_name, ...]}``.
+        include: Per-source allow-list; when given for a source, only these
+            labels are kept from it.
+        source_properties: Pre-loaded segment properties per source, keyed by
+            path; loaded from disk when omitted.
+        validate_labels: Check every configured selector against the source
+            volume up front, so a mistyped ID/name fails before meshing. Set
+            ``False`` only for the legacy permissive behavior.
+
+    Returns:
+        A mapping ``{source_path: {old_id: new_id}}`` describing the remapping,
+        also written to ``label_map.json`` in the output.
+
+    Raises:
+        ValueError: If fewer than two sources are given, ``output_dir`` is
+            inside a source, a group key is ambiguous, or (when
+            ``validate_labels``) a selector is absent from its source.
     """
     return _merge_datastacks(
         datastack_dirs=datastack_dirs,
@@ -615,11 +665,36 @@ def replace_labels(
 ) -> dict:
     """Replace selected ``base`` labels with geometry from ``replacement``.
 
-    The selected labels are excluded from ``base`` and the replacement stack is
-    merged in independently. By default every non-zero replacement label is
-    included; ``replacement_labels`` restricts that. Output IDs follow the
-    normal merge remapping -- this is not a voxelwise overwrite and does not
-    preserve source IDs.
+    A group-level substitution between exactly two stacks: the selected labels
+    are excluded from ``base``, every other ``base`` label is kept, and the
+    replacement stack is merged in independently. This is not a voxelwise
+    overwrite -- there is no required one-to-one pairing between removed and
+    added labels, and output IDs follow the normal merge remapping rather than
+    preserving source IDs.
+
+    Args:
+        base: The base datastack; its selected labels are removed.
+        replacement: The datastack supplying the new geometry.
+        labels: Labels to remove from ``base`` (IDs or names). At least one must
+            be present.
+        output_dir: Directory for the merged dataset.
+        replacement_labels: Restrict the replacement to these labels; defaults to
+            every non-zero label in ``replacement``.
+        mesh_dir: Name of the mesh subdirectory within each source.
+        unsharded: Use the unsharded format (default ``True``).
+        label_names: Per-source name overrides, ``{source: {id: name}}``.
+        exclude: Additional per-source labels to drop.
+        source_properties: Pre-loaded segment properties per source; loaded from
+            disk when omitted.
+
+    Returns:
+        The merge label map, ``{source_path: {old_id: new_id}}`` (see
+        `merge_datastacks`).
+
+    Raises:
+        ValueError: If no base label is selected, a selected base or replacement
+            label is absent, the replacement has no non-zero labels, or
+            exclusions would remove every replacement contribution.
     """
     source_paths = _source_paths([base, replacement])
     _validate_output_path(output_dir, source_paths)
@@ -694,7 +769,24 @@ replace_datastack_labels = replace_labels
 
 @dataclass
 class DatastackMerger:
-    """Object-oriented configuration for merge and replacement workflows."""
+    """Object-oriented configuration for merge and replacement workflows.
+
+    Bundles the shared options so `run` (alias ``merge``) and `replace` can be
+    called without repeating them; both delegate to `merge_datastacks` /
+    `replace_labels`. The configured ``label_names`` and ``exclude`` mappings
+    are honored by both methods.
+
+    Attributes:
+        datastacks: The source datastack directories. Merging takes two or more;
+            replacement requires exactly two (base first, replacement second).
+        output_dir: Directory for the merged dataset.
+        unsharded: Use the unsharded format (default ``True``).
+        mesh_dir: Name of the mesh subdirectory within each source.
+        label_names: Per-source name overrides, ``{source: {id: name}}``.
+        exclude: Per-source labels to drop, ``{source: [id_or_name, ...]}``.
+        source_properties: Pre-loaded segment properties per source; loaded from
+            disk when omitted.
+    """
 
     datastacks: Sequence[AnyPath]
     output_dir: AnyPath
@@ -705,7 +797,12 @@ class DatastackMerger:
     source_properties: Optional[Mapping] = None
 
     def run(self) -> dict:
-        """Merge the configured datastacks; return the source-to-output label map."""
+        """Merge the configured datastacks.
+
+        Returns:
+            The merge label map, ``{source_path: {old_id: new_id}}`` (see
+            `merge_datastacks`).
+        """
         return merge_datastacks(
             self.datastacks,
             self.output_dir,
@@ -724,7 +821,23 @@ class DatastackMerger:
         *,
         replacement_labels: Optional[Iterable[LabelSelector]] = None,
     ) -> dict:
-        """Replace ``labels`` in the first datastack with geometry from the second."""
+        """Replace ``labels`` in the first datastack with geometry from the second.
+
+        Requires exactly two configured ``datastacks`` (base first, replacement
+        second) and delegates to `replace_labels`.
+
+        Args:
+            labels: Labels to remove from the base stack (IDs or names).
+            replacement_labels: Restrict the replacement to these labels;
+                defaults to every non-zero label in the replacement stack.
+
+        Returns:
+            The merge label map, ``{source_path: {old_id: new_id}}``.
+
+        Raises:
+            ValueError: If ``datastacks`` does not contain exactly two entries,
+                or as raised by `replace_labels`.
+        """
         if len(self.datastacks) != 2:
             raise ValueError(
                 "DatastackMerger.replace() requires exactly two datastacks: "

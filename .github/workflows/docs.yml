@@ -39,7 +39,7 @@ jobs:
         run: |
           uv sync --group docs
           uv run --group docs pdoc \
-            --docformat markdown \
+            --docformat google \
             --edit-url mesh_creation=https://github.com/${{ github.repository }}/blob/main/mesh_creation/ \
             --footer-text "mesh-creation — CRANTb mesh creation" \
             -o site \

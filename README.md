@@ -6,6 +6,8 @@ Mesh creation workflow for the Haberkern Lab for clonal raider ant connectome (C
 
 This package uses [Igneous](https://github.com/seung-lab/igneous) mesh generation tasks in the backend. It accepts 3D TIFF segmentation images (e.g. from Thermo Fisher AMIRA) or STL mesh files and generates neuropil meshes that can be visualized in [Neuroglancer](https://github.com/google/neuroglancer). The same workflows are available through the existing command-line interface and through functional or object-oriented Python APIs.
 
+📖 **API documentation:** <https://yigityargili991.github.io/crantconnectome-haberkernlab-meshcreation/> — generated from the source with [pdoc](https://pdoc.dev) and redeployed automatically on every merge to `main`.
+
 ## Installation
 
 ```bash

@@ -1,0 +1,62 @@
+name: Deploy documentation
+
+# Rebuilds the pdoc API documentation and publishes it to GitHub Pages.
+# Runs on every push to main, which includes each pull-request merge, plus a
+# manual trigger from the Actions tab.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege token scoped to what the Pages deploy needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Serialize deploys so a newer run never races an older one; do not cancel an
+# in-flight deploy mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build API documentation with pdoc
+        run: |
+          uv sync --group docs
+          uv run --group docs pdoc \
+            --docformat markdown \
+            --edit-url mesh_creation=https://github.com/${{ github.repository }}/blob/main/mesh_creation/ \
+            --footer-text "mesh-creation — CRANTb mesh creation" \
+            -o site \
+            mesh_creation
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

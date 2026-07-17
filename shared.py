@@ -17,12 +17,10 @@ _CHUNK_CANDIDATES = (32, 64, 128)
 
 
 def validate_mesh_dir(mesh_dir, root=None):
-    """Validate that a mesh directory is a safe relative child path.
+    """Validate that ``mesh_dir`` is a safe relative child path; return it unchanged.
 
-    When ``root`` is supplied, existing symlinks are resolved and the target
-    must remain strictly below that root. The original path string is returned
-    so valid historical metadata and task arguments remain byte-for-byte
-    unchanged.
+    When ``root`` is given, symlinks are resolved and the target must stay
+    strictly below it.
     """
     mesh_dir = os.fspath(mesh_dir)
     if not isinstance(mesh_dir, str):
@@ -58,6 +56,7 @@ def validate_mesh_dir(mesh_dir, root=None):
 
 
 def get_github_username() -> str:
+    """Return the authenticated GitHub username via the ``gh`` CLI."""
     result = subprocess.run(
         ["gh", "api", "user", "--jq", ".login"],
         capture_output=True, text=True
@@ -71,6 +70,7 @@ def get_github_username() -> str:
 
 
 def build_neuroglancer_raw_link(full_repo: str, commit_hash: str) -> str:
+    """Build the ``raw.githubusercontent.com`` Neuroglancer precomputed source URL."""
     return (
         f"https://raw.githubusercontent.com/{full_repo}/"
         f"{commit_hash}/|neuroglancer-precomputed:"
@@ -78,6 +78,7 @@ def build_neuroglancer_raw_link(full_repo: str, commit_hash: str) -> str:
 
 
 def push_to_github(output_dir: str, repo_name: str, *, force: bool = False):
+    """Push ``output_dir`` to a public GitHub repo and log its Neuroglancer raw link."""
     username = get_github_username()
     full_repo = f"{username}/{repo_name}"
     logger.info(f"Pushing to GitHub repo: {full_repo}")
@@ -150,10 +151,7 @@ SEGMENT_PROPS_DIR = "segment_properties"
 
 
 def parse_labels(labels_arg):
-    """Parse a list of 'ID:NAME' strings into a {int: str} dict.
-
-    Used by tiff_to_mesh where there's a single source.
-    """
+    """Parse ``ID:NAME`` strings into a ``{int: str}`` label-name mapping."""
     mapping = {}
     for item in labels_arg:
         if ':' not in item:
@@ -482,6 +480,7 @@ def publish_mesh_files(mesh_src_dir, output_dir):
 
 
 def attach_segment_properties_to_info(info_path, segment_properties_dir=SEGMENT_PROPS_DIR):
+    """Set the ``segment_properties`` key in a dataset's ``info`` file."""
     with open(info_path) as f:
         info = json.load(f)
     info["segment_properties"] = segment_properties_dir

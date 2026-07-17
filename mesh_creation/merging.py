@@ -43,6 +43,7 @@ GroupedLabels = Mapping[os.PathLike, Mapping[int, str]]
 
 
 def _source_paths(datastack_dirs: Sequence[os.PathLike]) -> list:
+    """Validate and canonicalize the datastack directories, rejecting duplicates."""
     if len(datastack_dirs) < 2:
         raise ValueError("At least 2 datastack directories are required.")
 
@@ -61,6 +62,7 @@ def _source_paths(datastack_dirs: Sequence[os.PathLike]) -> list:
 
 
 def _validate_output_path(output_dir: os.PathLike, source_paths: Sequence[str]) -> str:
+    """Ensure the output directory neither contains nor sits inside any source."""
     output_path = os.path.abspath(os.fspath(output_dir))
     output_resolved = os.path.realpath(output_path)
     for source_path in source_paths:
@@ -78,6 +80,7 @@ def _validate_output_path(output_dir: os.PathLike, source_paths: Sequence[str]) 
 
 
 def _resolve_source_key(key: os.PathLike, source_paths: Sequence[str]) -> str:
+    """Map a group key (path or unique basename) to its canonical source path."""
     key_string = os.fspath(key)
     absolute_key = os.path.abspath(key_string)
     direct = [path for path in source_paths if path == absolute_key]
@@ -106,6 +109,7 @@ def _resolve_source_key(key: os.PathLike, source_paths: Sequence[str]) -> str:
 def _normalize_grouped_mapping(
     grouped: Optional[Mapping], source_paths: Sequence[str]
 ) -> dict:
+    """Re-key a source-grouped mapping by canonical source path."""
     if grouped is None:
         return {}
     normalized = {}
@@ -120,6 +124,7 @@ def _normalize_grouped_mapping(
 def _load_source_properties(
     source_paths: Sequence[str], supplied: Optional[Mapping]
 ) -> dict:
+    """Load each source's segment properties, preferring caller-supplied ones."""
     supplied_by_path = _normalize_grouped_mapping(supplied, source_paths)
     properties = {}
     for source_path in source_paths:
@@ -137,6 +142,7 @@ def _resolve_selectors(
     *,
     reject_ambiguous_names: bool = False,
 ) -> set:
+    """Resolve label selectors (numeric IDs or property names) to a set of IDs."""
     if isinstance(selectors, (str, bytes)):
         selectors = [selectors]
     reverse = {}
@@ -181,6 +187,7 @@ def _normalize_selectors_by_source(
     source_paths: Sequence[str],
     source_properties: Mapping[str, Optional[Mapping[int, str]]],
 ) -> dict:
+    """Resolve each source's selectors to label-ID sets, keyed by source path."""
     normalized = _normalize_grouped_mapping(grouped, source_paths)
     return {
         source_path: _resolve_selectors(
@@ -193,6 +200,7 @@ def _normalize_selectors_by_source(
 def _normalize_manual_labels(
     grouped: Optional[GroupedLabels], source_paths: Sequence[str]
 ) -> dict:
+    """Normalize manual ``{old_id: name}`` overrides, keyed by source path."""
     normalized = _normalize_grouped_mapping(grouped, source_paths)
     return {
         source_path: {int(label_id): str(name) for label_id, name in labels.items()}
@@ -201,6 +209,7 @@ def _normalize_manual_labels(
 
 
 def _read_present_labels(source_path: str) -> set:
+    """Return the set of non-zero label IDs present in a source volume."""
     volume = CloudVolume(f"file://{source_path}", mip=0, fill_missing=True)
     data = np.squeeze(volume[:], axis=-1)
     return {int(label) for label in np.unique(data).tolist() if int(label) != 0}
@@ -242,6 +251,7 @@ def _validate_label_selections(
     inclusions_by_path: Mapping[str, set],
     manual_labels_by_path: Mapping[str, Mapping[int, str]],
 ) -> None:
+    """Raise if any excluded/included/named label is absent from its source."""
     present_by_path = {
         source_path: {int(label) for label in present_labels}
         for source_path, present_labels in zip(source_paths, all_labels)
@@ -280,15 +290,10 @@ def _merge_datastacks(
 ) -> dict:
     """Merge precomputed datastacks into one standalone mesh dataset.
 
-    This is the shared implementation behind the public API and compatibility
-    wrapper. Group keys may be absolute source paths or unique basenames.
-
-    Sources are meshed independently, then assigned contiguous output IDs in
-    source order and ascending input-label order. The return value and
-    ``label_map.json`` map absolute source paths to ``old_id -> new_id`` maps.
-
-    Unsharded output is the safe default for independent-source aggregation.
-    Passing ``unsharded=False`` retains the legacy CLI's sharded workflow.
+    Group keys may be absolute source paths or unique basenames. Sources are
+    meshed independently, then assigned contiguous output IDs in source order
+    and ascending input-label order. Returns (and writes to ``label_map.json``)
+    a map from each source path to its ``old_id -> new_id`` remapping.
     """
     mesh_dir = validate_mesh_dir(mesh_dir)
     source_paths = _source_paths(datastack_dirs)
@@ -567,18 +572,12 @@ def merge_datastacks(
 ) -> dict:
     """Merge precomputed datastacks into one standalone mesh dataset.
 
-    ``labels``, ``exclude``, and ``include`` are grouped by source. A group key
-    may be an absolute source path or a basename that is unique among the
-    inputs. Label selectors may be numeric IDs or names from segment properties.
-
-    Sources are meshed independently, then assigned contiguous output IDs in
-    source order and ascending input-label order. The return value and
-    ``label_map.json`` map absolute source paths to ``old_id -> new_id`` maps.
-
-    Unsharded output is the safe default for independent-source aggregation.
-    Passing ``unsharded=False`` explicitly retains the legacy sharded workflow.
-    By default, configured label IDs are checked against the source volumes;
-    pass ``validate_labels=False`` only for legacy permissive behavior.
+    ``labels``, ``exclude``, and ``include`` are grouped by source; a group key
+    is an absolute source path or a basename unique among the inputs, and label
+    selectors may be numeric IDs or names from segment properties. Sources are
+    meshed independently and assigned contiguous output IDs in source order and
+    ascending input-label order. Returns (and writes to ``label_map.json``) a
+    map from each source path to its ``old_id -> new_id`` remapping.
     """
     return _merge_datastacks(
         datastack_dirs=datastack_dirs,
@@ -606,14 +605,13 @@ def replace_labels(
     exclude: Optional[GroupedSelectors] = None,
     source_properties: Optional[Mapping] = None,
 ) -> dict:
-    """Replace a group of labels from one stack with geometry from another.
+    """Replace selected ``base`` labels with geometry from ``replacement``.
 
-    This is the explicit library form of the existing CLI workaround:
-    selected labels are excluded from ``base`` and the replacement
-    stack is merged independently. By default every non-zero label from the
-    replacement stack is included. ``replacement_labels`` can restrict that
-    contribution. Output IDs follow normal deterministic merge remapping; this
-    operation is not a voxelwise overwrite and does not preserve source IDs.
+    The selected labels are excluded from ``base`` and the replacement stack is
+    merged in independently. By default every non-zero replacement label is
+    included; ``replacement_labels`` restricts that. Output IDs follow the
+    normal merge remapping -- this is not a voxelwise overwrite and does not
+    preserve source IDs.
     """
     source_paths = _source_paths([base, replacement])
     _validate_output_path(output_dir, source_paths)
@@ -699,6 +697,7 @@ class DatastackMerger:
     source_properties: Optional[Mapping] = None
 
     def run(self) -> dict:
+        """Merge the configured datastacks; return the source-to-output label map."""
         return merge_datastacks(
             self.datastacks,
             self.output_dir,
@@ -717,6 +716,7 @@ class DatastackMerger:
         *,
         replacement_labels: Optional[Iterable[LabelSelector]] = None,
     ) -> dict:
+        """Replace ``labels`` in the first datastack with geometry from the second."""
         if len(self.datastacks) != 2:
             raise ValueError(
                 "DatastackMerger.replace() requires exactly two datastacks: "
@@ -737,6 +737,7 @@ class DatastackMerger:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the datastack-merge CLI argument parser."""
     parser = argparse.ArgumentParser(
         description=(
             "Merge multiple Neuroglancer precomputed mesh datastacks into one."
@@ -794,6 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> None:
+    """CLI entry point: parse arguments and merge the datastacks."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = build_parser()
     args = parser.parse_args(argv)

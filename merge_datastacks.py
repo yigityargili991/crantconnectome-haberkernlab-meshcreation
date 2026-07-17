@@ -14,6 +14,7 @@ from shared import MESH_DIR
 
 
 def _expand_legacy_groups(grouped, source_paths):
+    """Re-key source-grouped options by absolute path, accepting basenames too."""
     if grouped is None:
         return None
     expanded = {}
@@ -34,12 +35,7 @@ def merge_datastacks(
     exclusions=None,
     source_properties=None,
 ):
-    """Compatibility adapter for the original module-level function.
-
-    New code should import :func:`mesh_creation.merge_datastacks`, whose API
-    uses keyword-only options named ``labels`` and ``exclude`` and defaults to
-    the safe unsharded merge format.
-    """
+    """Legacy positional-argument wrapper for :func:`mesh_creation.merge_datastacks`."""
     source_paths = [os.path.abspath(os.fspath(path)) for path in datastack_dirs]
     return _merge_datastacks(
         source_paths,

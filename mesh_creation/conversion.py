@@ -1,9 +1,4 @@
-"""TIFF/STL to Neuroglancer mesh conversion.
-
-This module contains the implementation used by both the Python API and the
-legacy ``tiff_to_mesh.py`` command.  Importing it is deliberately side-effect
-free: argument parsing and logging configuration only happen in ``main``.
-"""
+"""Convert TIFF or STL inputs into a Neuroglancer precomputed mesh dataset."""
 
 import argparse
 import json
@@ -90,9 +85,8 @@ def ensure_uint32_labels(array: np.ndarray) -> np.ndarray:
 class MeshEntryLabels:
     """Load TIFF or STL inputs into a uint32 ``(X, Y, Z)`` label volume.
 
-    TIFF data uses ``voxel_offset_override`` when supplied and otherwise uses
-    ``(0, 0, 0)``. STL data keeps its physical position by deriving the voxel
-    offset from the geometry.
+    TIFFs use ``voxel_offset_override`` (default ``(0, 0, 0)``); STLs derive
+    the voxel offset from their geometry so physical position is preserved.
     """
 
     file_paths: Sequence[os.PathLike]
@@ -126,6 +120,7 @@ class MeshEntryLabels:
             raise ValueError(f"Mixed or unsupported file types: {exts}")
 
     def _load_tiff(self, path: str) -> np.ndarray:
+        """Read a TIFF into a uint32 ``(X, Y, Z)`` label volume."""
         data = tifffile.imread(path)
         logger.info(f"Loaded TIFF shape: {data.shape}, dtype: {data.dtype}")
         data = ensure_uint32_labels(data)
@@ -134,6 +129,7 @@ class MeshEntryLabels:
         return data
 
     def _load_stls(self) -> np.ndarray:
+        """Voxelize the STL files into one volume, one label ID per file."""
         origins = []
         grids = []
         for stl_file in self.file_paths:
@@ -172,12 +168,14 @@ class MeshEntryLabels:
         return compute_chunk_size(self.data.shape, self.min_chunks)
 
     def compute_translation_nm(self) -> Tuple[int, int, int]:
+        """Return the voxel offset converted to physical nanometers."""
         return tuple(
             offset * resolution
             for offset, resolution in zip(self.voxel_offset, self.resolution)
         )
 
     def build_info(self) -> dict:
+        """Build the Neuroglancer precomputed ``info`` dict for this volume."""
         chunk_size = self.compute_chunk_size()
         translation_nm = self.compute_translation_nm()
         logger.info(
@@ -205,6 +203,7 @@ class MeshEntryLabels:
 
 
 def _normalize_label_overrides(labels: Optional[LabelOverrides]) -> dict:
+    """Coerce a mapping or ``ID:NAME`` strings into a ``{int: str}`` mapping."""
     if labels is None:
         return {}
     if isinstance(labels, Mapping):
@@ -215,6 +214,7 @@ def _normalize_label_overrides(labels: Optional[LabelOverrides]) -> dict:
 
 
 def _find_input_files(input_path: str) -> list:
+    """Return the TIFF/STL file(s) for a single path or a directory of them."""
     if os.path.isfile(input_path):
         return [input_path]
     candidates = sorted(
@@ -228,12 +228,14 @@ def _find_input_files(input_path: str) -> list:
 
 
 def _volume_name(input_path: str) -> str:
+    """Derive the dataset name from the input file or directory."""
     if os.path.isfile(input_path):
         return os.path.splitext(os.path.basename(input_path))[0]
     return os.path.basename(os.path.normpath(input_path))
 
 
 def _resolved_output_dir(input_path: str, output_base: Optional[str]) -> str:
+    """Resolve the final ``<base>/<name>`` dataset output directory."""
     volume_name = _volume_name(input_path)
     if output_base:
         return os.path.join(output_base, volume_name)
@@ -244,11 +246,10 @@ def _resolved_output_dir(input_path: str, output_base: Optional[str]) -> str:
 
 @dataclass
 class MeshConverter:
-    """Configuration object for the TIFF/STL conversion workflow.
+    """Configurable TIFF/STL to Neuroglancer mesh conversion.
 
-    ``output_dir`` has the same semantics as the existing ``--out`` flag: it
-    is a base directory and the input name is appended to it. ``run`` returns
-    that final dataset directory.
+    ``output_dir`` is a base directory; the input name is appended to it and
+    ``run`` returns that final dataset directory.
     """
 
     input_path: os.PathLike
@@ -263,6 +264,7 @@ class MeshConverter:
     mesh_dir: str = MESH_DIR
 
     def run(self) -> str:
+        """Voxelize the input, mesh it, write segment properties; return the dataset dir."""
         input_path = os.fspath(self.input_path)
         output_base = (
             os.fspath(self.output_dir) if self.output_dir is not None else None
@@ -419,7 +421,7 @@ def tiff_to_mesh(
     push: Optional[str] = None,
     mesh_dir: str = MESH_DIR,
 ) -> str:
-    """Convert a TIFF/STL input using the same workflow as the CLI."""
+    """Convert a TIFF/STL input to a Neuroglancer mesh dataset; return its directory."""
     return MeshConverter(
         input_path=input_path,
         output_dir=output_dir,
@@ -438,6 +440,7 @@ create_mesh = tiff_to_mesh
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the ``tiff_to_mesh`` CLI argument parser."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--d", required=True, help="Directory or path to a TIFF/STL file"
@@ -510,6 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> None:
+    """CLI entry point: parse arguments and run the conversion."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = build_parser().parse_args(argv)
     tiff_to_mesh(

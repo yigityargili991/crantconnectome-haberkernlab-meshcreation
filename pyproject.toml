@@ -1,6 +1,9 @@
 [project]
 name = "mesh-creation"
-version = "0.5.1"
+version = "0.6.0"
+description = "TIFF/STL to Neuroglancer mesh creation and datastack merging workflows"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
 dependencies = [
     "numpy",
@@ -9,7 +12,20 @@ dependencies = [
     "igneous-pipeline",
     "task-queue",
     "trimesh",
+    "ipykernel>=6.31.0",
 ]
+
+[project.scripts]
+tiff-to-mesh = "mesh_creation.conversion:main"
+merge-datastacks = "mesh_creation.merging:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["mesh_creation"]
+py-modules = ["merge_datastacks", "shared", "tiff_to_mesh"]
 
 [tool.uv]
 environments = ["platform_system != 'Windows'"]

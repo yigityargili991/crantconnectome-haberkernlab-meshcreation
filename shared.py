@@ -16,6 +16,47 @@ MESH_DIR = "mesh"
 _CHUNK_CANDIDATES = (32, 64, 128)
 
 
+def validate_mesh_dir(mesh_dir, root=None):
+    """Validate that a mesh directory is a safe relative child path.
+
+    When ``root`` is supplied, existing symlinks are resolved and the target
+    must remain strictly below that root. The original path string is returned
+    so valid historical metadata and task arguments remain byte-for-byte
+    unchanged.
+    """
+    mesh_dir = os.fspath(mesh_dir)
+    if not isinstance(mesh_dir, str):
+        raise TypeError("mesh_dir must be a string or string-like path")
+    if not mesh_dir or os.path.isabs(mesh_dir):
+        raise ValueError("mesh_dir must be a non-empty relative path")
+
+    raw_path = mesh_dir
+    if os.altsep:
+        raw_path = raw_path.replace(os.altsep, os.sep)
+    raw_components = raw_path.split(os.sep)
+    normalized = os.path.normpath(mesh_dir)
+    components = normalized.split(os.sep)
+    if (
+        normalized in {os.curdir, os.pardir}
+        or os.pardir in raw_components
+        or os.pardir in components
+    ):
+        raise ValueError("mesh_dir must be a child path without '..' traversal")
+
+    if root is not None:
+        root_path = os.path.realpath(os.fspath(root))
+        target_path = os.path.realpath(os.path.join(root_path, mesh_dir))
+        try:
+            common = os.path.commonpath([root_path, target_path])
+        except ValueError as error:
+            raise ValueError(
+                "mesh_dir must stay within the output directory"
+            ) from error
+        if common != root_path or target_path == root_path:
+            raise ValueError("mesh_dir must stay within the output directory")
+    return mesh_dir
+
+
 def get_github_username() -> str:
     result = subprocess.run(
         ["gh", "api", "user", "--jq", ".login"],

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared import (
+from shared import (  # noqa: E402
     build_label_names_for_inputs,
     build_neuroglancer_raw_link,
     parse_label_csv,

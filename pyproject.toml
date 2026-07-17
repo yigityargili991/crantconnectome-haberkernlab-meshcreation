@@ -19,6 +19,10 @@ dependencies = [
 tiff-to-mesh = "mesh_creation.conversion:main"
 merge-datastacks = "mesh_creation.merging:main"
 
+[dependency-groups]
+# mypy 1.20 dropped --python-version 3.9; unpin when requires-python moves to 3.10+
+dev = ["mypy>=1.14,<1.20"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -26,6 +30,22 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["mesh_creation"]
 py-modules = ["merge_datastacks", "shared", "tiff_to_mesh"]
+
+[tool.mypy]
+files = ["mesh_creation", "shared.py", "tiff_to_mesh.py", "merge_datastacks.py", "tests"]
+python_version = "3.9"
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["cloudvolume.*", "taskqueue.*", "igneous.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# tifffile is typed inline but its source uses 3.10+ syntax, which mypy
+# cannot parse under python_version 3.9
+module = "tifffile.*"
+follow_imports = "skip"
+ignore_missing_imports = true
 
 [tool.uv]
 environments = ["platform_system != 'Windows'"]

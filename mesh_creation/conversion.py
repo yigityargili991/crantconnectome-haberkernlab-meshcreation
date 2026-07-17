@@ -20,6 +20,7 @@ from shared import (
     MESH_DIR,
     SEGMENT_PROPS_DIR,
     UINT32_MAX,
+    AnyPath,
     build_label_names_for_inputs,
     compute_chunk_size,
     parse_label_csv,
@@ -89,7 +90,7 @@ class MeshEntryLabels:
     the voxel offset from their geometry so physical position is preserved.
     """
 
-    file_paths: Sequence[os.PathLike]
+    file_paths: Sequence[AnyPath]
     resolution: Sequence[int]
     min_chunks: int = 8
     voxel_offset_override: Optional[Sequence[int]] = None
@@ -119,7 +120,7 @@ class MeshEntryLabels:
         else:
             raise ValueError(f"Mixed or unsupported file types: {exts}")
 
-    def _load_tiff(self, path: str) -> np.ndarray:
+    def _load_tiff(self, path: AnyPath) -> np.ndarray:
         """Read a TIFF into a uint32 ``(X, Y, Z)`` label volume."""
         data = tifffile.imread(path)
         logger.info(f"Loaded TIFF shape: {data.shape}, dtype: {data.dtype}")
@@ -133,7 +134,8 @@ class MeshEntryLabels:
         origins = []
         grids = []
         for stl_file in self.file_paths:
-            mesh = trimesh.load(stl_file, force="mesh")
+            mesh = trimesh.load(os.fspath(stl_file), force="mesh")
+            assert isinstance(mesh, trimesh.Trimesh)  # force="mesh" guarantees this
             logger.info(
                 f"Loaded STL {os.path.basename(stl_file)}: "
                 f"{len(mesh.vertices)} verts, {len(mesh.faces)} faces"
@@ -169,10 +171,11 @@ class MeshEntryLabels:
 
     def compute_translation_nm(self) -> Tuple[int, int, int]:
         """Return the voxel offset converted to physical nanometers."""
-        return tuple(
+        x, y, z = (
             offset * resolution
             for offset, resolution in zip(self.voxel_offset, self.resolution)
         )
+        return (x, y, z)
 
     def build_info(self) -> dict:
         """Build the Neuroglancer precomputed ``info`` dict for this volume."""
@@ -252,13 +255,13 @@ class MeshConverter:
     ``run`` returns that final dataset directory.
     """
 
-    input_path: os.PathLike
-    output_dir: Optional[os.PathLike] = None
+    input_path: AnyPath
+    output_dir: Optional[AnyPath] = None
     resolution: Sequence[int] = DEFAULT_RESOLUTION
     voxel_offset: Sequence[int] = DEFAULT_VOXEL_OFFSET
     unsharded: bool = False
     labels: Optional[LabelOverrides] = None
-    label_file: Optional[os.PathLike] = None
+    label_file: Optional[AnyPath] = None
     setgit: bool = False
     push: Optional[str] = None
     mesh_dir: str = MESH_DIR
@@ -409,14 +412,14 @@ class MeshConverter:
 
 
 def tiff_to_mesh(
-    input_path: os.PathLike,
-    output_dir: Optional[os.PathLike] = None,
+    input_path: AnyPath,
+    output_dir: Optional[AnyPath] = None,
     *,
     resolution: Sequence[int] = DEFAULT_RESOLUTION,
     voxel_offset: Sequence[int] = DEFAULT_VOXEL_OFFSET,
     unsharded: bool = False,
     labels: Optional[LabelOverrides] = None,
-    label_file: Optional[os.PathLike] = None,
+    label_file: Optional[AnyPath] = None,
     setgit: bool = False,
     push: Optional[str] = None,
     mesh_dir: str = MESH_DIR,

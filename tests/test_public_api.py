@@ -378,8 +378,8 @@ class ReplaceLabelsTest(unittest.TestCase):
             calls.append((args, kwargs))
             return result_sentinel
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             base = tmp / "base_stack"
             replacement = tmp / "replacement_stack"
             output = tmp / "merged"
@@ -463,8 +463,8 @@ class ReplaceLabelsTest(unittest.TestCase):
         from mesh_creation import replace_labels
 
         delegate = mock.Mock()
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             base = tmp / "base"
             replacement = tmp / "replacement"
             output = tmp / "output"
@@ -491,8 +491,8 @@ class ReplaceLabelsTest(unittest.TestCase):
         from mesh_creation import replace_labels
 
         delegate = mock.Mock()
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             base = tmp / "base"
             replacement = tmp / "replacement"
             base.mkdir()
@@ -658,8 +658,8 @@ class ConversionBehaviorTest(unittest.TestCase):
     def test_conversion_rejects_mesh_paths_that_can_escape_before_deleting(self):
         from mesh_creation import tiff_to_mesh
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             input_path = tmp / "sample.tif"
             input_path.write_bytes(b"fixture")
             victim = tmp / "victim"
@@ -687,8 +687,8 @@ class ConversionBehaviorTest(unittest.TestCase):
     def test_conversion_rejects_a_mesh_symlink_outside_the_output(self):
         from mesh_creation import tiff_to_mesh
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             input_path = tmp / "sample.tif"
             input_path.write_bytes(b"fixture")
             output_dir = tmp / "output" / "sample"
@@ -708,8 +708,8 @@ class MergePathSafetyTest(unittest.TestCase):
     def test_output_may_not_be_inside_an_input_datastack(self):
         from mesh_creation import merge_datastacks
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             first = tmp / "first"
             second = tmp / "second"
             first.mkdir()
@@ -866,10 +866,13 @@ class ObjectOrientedDelegationTest(unittest.TestCase):
             exclude={"stack-a": [2]},
             source_properties={"stack-a": {1: "PB", 2: "FB"}},
         )
-        globals_dict = merger.run.__func__.__globals__
+        globals_dict = merger.run.__func__.__globals__  # type: ignore[attr-defined]
 
         self.assertIn("merge_datastacks", globals_dict)
-        self.assertIn("replace_labels", merger.replace.__func__.__globals__)
+        self.assertIn(
+            "replace_labels",
+            merger.replace.__func__.__globals__,  # type: ignore[attr-defined]
+        )
         with mock.patch.dict(
             globals_dict,
             {

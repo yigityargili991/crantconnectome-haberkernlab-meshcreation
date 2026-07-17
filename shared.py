@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import shutil
+from typing import Union
 
 import numpy as np
 
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 UINT32_MAX = np.iinfo(np.uint32).max
 MESH_DIR = "mesh"
 _CHUNK_CANDIDATES = (32, 64, 128)
+
+AnyPath = Union[str, os.PathLike]
 
 
 def validate_mesh_dir(mesh_dir, root=None):
@@ -291,7 +294,7 @@ def parse_grouped_labels(labels_arg):
     Tokens without ':' are treated as directory names (section headers).
     Returns {dirname: {old_label_id: name}}.
     """
-    groups = {}
+    groups: dict[str, dict[int, str]] = {}
     current_dir = None
     for item in labels_arg:
         if ':' not in item:
@@ -315,7 +318,7 @@ def parse_grouped_exclusions(exclude_arg, known_dirnames):
     Other tokens are label specifiers: tried as int (label ID) first,
     otherwise kept as str (label name).
     """
-    groups = {}
+    groups: dict[str, list[Union[int, str]]] = {}
     current_dir = None
     for token in exclude_arg:
         if token in known_dirnames:
@@ -347,7 +350,7 @@ def resolve_exclusions(exclusions, source_properties):
     resolved = {}
     for dirname, specifiers in exclusions.items():
         props = source_properties.get(dirname)
-        reverse = {}
+        reverse: dict[str, list[int]] = {}
         if props:
             for lid, name in props.items():
                 reverse.setdefault(name, []).append(lid)

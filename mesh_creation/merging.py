@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Iterable, Mapping, Optional, Sequence, Union
+from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 
 import numpy as np
 from cloudvolume import CloudVolume
@@ -18,6 +18,7 @@ from cloudvolume.lib import Bbox
 from shared import (
     MESH_DIR,
     UINT32_MAX,
+    AnyPath,
     attach_segment_properties_to_info,
     compute_chunk_size,
     finalize_sharded_meshes,
@@ -38,11 +39,14 @@ from shared import (
 logger = logging.getLogger(__name__)
 
 LabelSelector = Union[int, str]
-GroupedSelectors = Mapping[os.PathLike, Iterable[LabelSelector]]
-GroupedLabels = Mapping[os.PathLike, Mapping[int, str]]
+# Group keys are paths or unique basenames, resolved at runtime via os.fspath
+# and basename matching; Mapping's invariant key type would otherwise reject
+# either str- or Path-keyed dicts.
+GroupedSelectors = Mapping[Any, Iterable[LabelSelector]]
+GroupedLabels = Mapping[Any, Mapping[int, str]]
 
 
-def _source_paths(datastack_dirs: Sequence[os.PathLike]) -> list:
+def _source_paths(datastack_dirs: Sequence[AnyPath]) -> list:
     """Validate and canonicalize the datastack directories, rejecting duplicates."""
     if len(datastack_dirs) < 2:
         raise ValueError("At least 2 datastack directories are required.")
@@ -61,7 +65,7 @@ def _source_paths(datastack_dirs: Sequence[os.PathLike]) -> list:
     return paths
 
 
-def _validate_output_path(output_dir: os.PathLike, source_paths: Sequence[str]) -> str:
+def _validate_output_path(output_dir: AnyPath, source_paths: Sequence[str]) -> str:
     """Ensure the output directory neither contains nor sits inside any source."""
     output_path = os.path.abspath(os.fspath(output_dir))
     output_resolved = os.path.realpath(output_path)
@@ -79,7 +83,7 @@ def _validate_output_path(output_dir: os.PathLike, source_paths: Sequence[str]) 
     return output_path
 
 
-def _resolve_source_key(key: os.PathLike, source_paths: Sequence[str]) -> str:
+def _resolve_source_key(key: AnyPath, source_paths: Sequence[str]) -> str:
     """Map a group key (path or unique basename) to its canonical source path."""
     key_string = os.fspath(key)
     absolute_key = os.path.abspath(key_string)
@@ -143,9 +147,13 @@ def _resolve_selectors(
     reject_ambiguous_names: bool = False,
 ) -> set:
     """Resolve label selectors (numeric IDs or property names) to a set of IDs."""
-    if isinstance(selectors, (str, bytes)):
+    if isinstance(selectors, str):
         selectors = [selectors]
-    reverse = {}
+    elif isinstance(selectors, bytes):
+        raise TypeError(
+            f"Label selectors must be integer IDs or names, got {selectors!r}"
+        )
+    reverse: dict[str, list[int]] = {}
     if properties:
         for label_id, name in properties.items():
             reverse.setdefault(name, []).append(int(label_id))
@@ -277,8 +285,8 @@ def _validate_label_selections(
 
 
 def _merge_datastacks(
-    datastack_dirs: Sequence[os.PathLike],
-    output_dir: os.PathLike,
+    datastack_dirs: Sequence[AnyPath],
+    output_dir: AnyPath,
     mesh_dir: str,
     unsharded: bool,
     manual_labels: Optional[GroupedLabels] = None,
@@ -559,8 +567,8 @@ def _merge_datastacks(
 
 
 def merge_datastacks(
-    datastack_dirs: Sequence[os.PathLike],
-    output_dir: os.PathLike,
+    datastack_dirs: Sequence[AnyPath],
+    output_dir: AnyPath,
     *,
     unsharded: bool = True,
     mesh_dir: str = MESH_DIR,
@@ -593,10 +601,10 @@ def merge_datastacks(
 
 
 def replace_labels(
-    base: os.PathLike,
-    replacement: os.PathLike,
+    base: AnyPath,
+    replacement: AnyPath,
     labels: Iterable[LabelSelector],
-    output_dir: os.PathLike,
+    output_dir: AnyPath,
     replacement_labels: Optional[Iterable[LabelSelector]] = None,
     *,
     mesh_dir: str = MESH_DIR,
@@ -688,8 +696,8 @@ replace_datastack_labels = replace_labels
 class DatastackMerger:
     """Object-oriented configuration for merge and replacement workflows."""
 
-    datastacks: Sequence[os.PathLike]
-    output_dir: os.PathLike
+    datastacks: Sequence[AnyPath]
+    output_dir: AnyPath
     unsharded: bool = True
     mesh_dir: str = MESH_DIR
     label_names: Optional[GroupedLabels] = None

@@ -13,18 +13,15 @@ from mesh_creation.merging import (
 from shared import MESH_DIR
 
 
-def _expand_legacy_groups(grouped, source_paths, *, fill_missing=False):
-    if grouped is None and not fill_missing:
+def _expand_legacy_groups(grouped, source_paths):
+    if grouped is None:
         return None
-    grouped = grouped or {}
     expanded = {}
     for source_path in source_paths:
         if source_path in grouped:
             expanded[source_path] = grouped[source_path]
         elif os.path.basename(source_path) in grouped:
             expanded[source_path] = grouped[os.path.basename(source_path)]
-        elif fill_missing:
-            expanded[source_path] = None
     return expanded
 
 
@@ -51,9 +48,7 @@ def merge_datastacks(
         unsharded=unsharded,
         labels=_expand_legacy_groups(manual_labels, source_paths),
         exclude=_expand_legacy_groups(exclusions, source_paths),
-        source_properties=_expand_legacy_groups(
-            source_properties, source_paths, fill_missing=True
-        ),
+        source_properties=_expand_legacy_groups(source_properties, source_paths),
         validate_labels=False,
     )
 

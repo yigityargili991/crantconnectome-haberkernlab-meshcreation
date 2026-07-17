@@ -800,6 +800,21 @@ def main(argv=None) -> None:
     if len(args.datastacks) < 2:
         parser.error("At least 2 datastack directories are required.")
 
+    if args.labels or args.exclude:
+        basenames = [
+            os.path.basename(os.path.abspath(directory))
+            for directory in args.datastacks
+        ]
+        duplicates = sorted(
+            {name for name in basenames if basenames.count(name) > 1}
+        )
+        if duplicates:
+            parser.error(
+                "--labels and --exclude group entries by directory basename, "
+                f"but these basenames are ambiguous: {', '.join(duplicates)}. "
+                "Give the datastack directories unique basenames."
+            )
+
     manual_labels = parse_grouped_labels(args.labels) if args.labels else None
     source_properties = {}
     for directory in args.datastacks:

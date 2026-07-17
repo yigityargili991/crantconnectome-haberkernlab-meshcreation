@@ -274,6 +274,72 @@ class CliCompatibilityTest(unittest.TestCase):
             validate_labels=False,
         )
 
+    def test_merge_cli_rejects_grouped_options_with_ambiguous_basenames(self):
+        from mesh_creation import merging
+
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "a" / "stack"
+            second = Path(tmp) / "b" / "stack"
+            first.mkdir(parents=True)
+            second.mkdir(parents=True)
+            delegate = mock.Mock()
+            with mock.patch.object(merging, "merge_datastacks", delegate):
+                with redirect_stderr(io.StringIO()) as stderr:
+                    with self.assertRaises(SystemExit):
+                        merging.main(
+                            [
+                                str(first),
+                                str(second),
+                                "--out",
+                                str(Path(tmp) / "merged"),
+                                "--exclude",
+                                "stack",
+                                "1",
+                            ]
+                        )
+
+        delegate.assert_not_called()
+        self.assertIn("ambiguous", stderr.getvalue())
+
+
+class LegacyAdapterTest(unittest.TestCase):
+    def test_omitted_source_properties_defer_to_the_library_default(self):
+        import merge_datastacks as legacy
+
+        delegate = mock.Mock(return_value={})
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first"
+            second = Path(tmp) / "second"
+            first.mkdir()
+            second.mkdir()
+            with mock.patch.object(legacy, "_merge_datastacks", delegate):
+                legacy.merge_datastacks(
+                    [str(first), str(second)], str(Path(tmp) / "merged")
+                )
+
+        self.assertIsNone(delegate.call_args.kwargs["source_properties"])
+
+    def test_supplied_source_properties_expand_to_absolute_paths(self):
+        import merge_datastacks as legacy
+
+        delegate = mock.Mock(return_value={})
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first"
+            second = Path(tmp) / "second"
+            first.mkdir()
+            second.mkdir()
+            with mock.patch.object(legacy, "_merge_datastacks", delegate):
+                legacy.merge_datastacks(
+                    [str(first), str(second)],
+                    str(Path(tmp) / "merged"),
+                    source_properties={"first": {1: "PB"}},
+                )
+
+        self.assertEqual(
+            delegate.call_args.kwargs["source_properties"],
+            {os.path.abspath(str(first)): {1: "PB"}},
+        )
+
 
 class ReplaceLabelsTest(unittest.TestCase):
     def _write_properties(self, stack, labels):
